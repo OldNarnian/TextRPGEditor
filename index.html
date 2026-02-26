@@ -76,8 +76,6 @@
         
         <hr>
         
-        <hr>
-        
         <h3 class="collapse-header color-player" onclick="toggleSection('player')">Player Settings <span id="icon-player">▶</span></h3>
         <div id="section-player" class="hidden">
             <div class="grid-2">
@@ -277,11 +275,10 @@
         let checkpointState = null; 
 
         let victoryConditions = { targetRoomId: 'none', requiredItems: [], deadNPCs: [], victoryMessage: "You have achieved victory!" };
-        let mapZoom = 1.0; let mapOffsetX = 0; let mapOffsetY = 0; let isDragging = false; let dragStartX = 0; let dragStartY = 0;
-		let gameVersion = 0;
-		let mapZoom = 1.0; let mapOffsetX = 0; let mapOffsetY = 0; let isDragging = false; let dragStartX = 0; let dragStartY = 0;
         let gameVersion = 0;
+        let mapZoom = 1.0; let mapOffsetX = 0; let mapOffsetY = 0; let isDragging = false; let dragStartX = 0; let dragStartY = 0;
         let currentFileHandle = null;
+
         const canvas = document.getElementById('mapCanvas'); const ctx = canvas.getContext('2d');
         const roomEditor = document.getElementById('room-editor'); const noSelection = document.getElementById('no-selection');
         const roomHeaderTitle = document.getElementById('room-header-title');
@@ -373,6 +370,7 @@
                 isDragging = true; dragStartX = e.clientX - mapOffsetX; dragStartY = e.clientY - mapOffsetY; return;
             }
             const rect = canvas.getBoundingClientRect(); 
+            // FIXED TYPO HERE: (rect.top was missing 'rect.')
             const x = (e.clientX - rect.left - mapOffsetX) / mapZoom; const y = (e.clientY - rect.top - mapOffsetY) / mapZoom;
             let clickedRoomId = null;
             for (const id in rooms) { if (x >= rooms[id].x - 20 && x <= rooms[id].x + 20 && y >= rooms[id].y - 20 && y <= rooms[id].y + 20) { clickedRoomId = id; break; } }
@@ -989,7 +987,6 @@
             if (currentRoom.eventCmd) {
                 let triggers = currentRoom.eventCmd.split(',').map(s => s.trim().toLowerCase()).filter(s => s);
                 if (triggers.includes(cmd)) {
-                    let eventTriggered = true;
                     if (currentRoom.eventMsg) logGame(`<em>${currentRoom.eventMsg}</em>`, "#cba6f7");
                     
                     let revealedHostile = false;
@@ -1011,12 +1008,10 @@
                         if (playRooms[playCurrentRoomId].isCheckpoint) saveCheckpoint();
                         look(); checkStealthOnEntry(); drawMap();
                     } else if (!revealedHostile) {
-                        // If we didn't move and didn't get attacked, just update the HUD
                         advanceTurn();
                     }
                     
-                    cmdInput.focus();
-                    return; // Stop parsing regular commands
+                    cmdInput.focus(); return; 
                 }
             }
 
@@ -1054,8 +1049,6 @@
                 look(); checkStealthOnEntry(); drawMap(); return true; 
             } else { logGame("You can't go that way.", "#f38ba8"); return false; }
         }
-
-        function triggerExport() { updateAliases(); updateVictory(); updatePlayerStats(); exportGame(); }
 
         async function exportGame() {
             const roomIds = Object.keys(rooms);
@@ -1511,7 +1504,7 @@
             }
             playCurrentRoomId = room.exits[direction]; 
             playRoomMusic(playRooms[playCurrentRoomId].music || "");
-            if (playRooms[playCurrentRoomId].isCheckpoint) saveCheckpoint(); // SAVE ON ENTRY
+            if (playRooms[playCurrentRoomId].isCheckpoint) saveCheckpoint(); 
             look(); checkStealthOnEntry(); return true; 
         } else { logGame("You can't go that way.", "#f38ba8"); return false; }
     }
@@ -1522,39 +1515,38 @@
 </body></html>`;
 
             try {
-                // Check if browser supports the modern File System Access API
                 if (window.showSaveFilePicker) {
-                    
-                    // First time exporting this session: Ask user to designate a file
                     if (!currentFileHandle) {
                         currentFileHandle = await window.showSaveFilePicker({
-                            suggestedName: `${safeName}_v${gameVersion}.html`,
+                            suggestedName: `${safeName}.html`,
                             types: [{ description: 'HTML Game File', accept: {'text/html': ['.html']} }],
                         });
                     }
-                    
-                    // Instantly overwrite the designated file
                     const writable = await currentFileHandle.createWritable();
                     await writable.write(standaloneHTML);
                     await writable.close();
                     
                     logGame(`<em>Saved to designated file: ${currentFileHandle.name} (Version ${gameVersion})</em>`, "#a6e3a1");
+
+                    if (gameVersion > 0 && gameVersion % 5 === 0) {
+                        const blob = new Blob([standaloneHTML], { type: 'text/html' });
+                        const url = URL.createObjectURL(blob);
+                        const a = document.createElement('a'); a.href = url; a.download = `${safeName}_backup_v${gameVersion}.html`;
+                        document.body.appendChild(a); a.click(); document.body.removeChild(a); URL.revokeObjectURL(url);
+                        logGame(`<em>Milestone backup (_v${gameVersion}) saved to your Downloads folder!</em>`, "#f9e2af");
+                    }
                 } else {
-                    // Fallback for Firefox/older browsers that don't support the API
                     const blob = new Blob([standaloneHTML], { type: 'text/html' });
                     const url = URL.createObjectURL(blob);
                     const a = document.createElement('a'); a.href = url; a.download = `${safeName}_v${gameVersion}.html`;
                     document.body.appendChild(a); a.click(); document.body.removeChild(a); URL.revokeObjectURL(url);
                 }
-                
                 gameVersion++;
             } catch (err) {
-                // Ignore if user hit "Cancel" on the file picker
                 if (err.name !== 'AbortError') { console.error(err); alert("Error saving file."); }
             }
         }
         
-        // --- IMPORT LOGIC ---
         // --- IMPORT LOGIC ---
         function importGame(event) {
             const file = event.target.files[0];
@@ -1564,9 +1556,7 @@
             reader.onload = function(e) {
                 const content = e.target.result;
                 try {
-                    // Search the exported HTML string for the core data blocks
                     const match = content.match(/let playRooms = (\{.*?\}); const aliases = (\{.*?\}); let playerStats = (\{.*?\}); let victoryConditions = (\{.*?\});/s);
-                    // Search for the new metadata block
                     const metaMatch = content.match(/let gameMeta = (\{.*?\});/);
                     
                     if (match) {
@@ -1575,14 +1565,11 @@
                         playerStats = JSON.parse(match[3]);
                         victoryConditions = JSON.parse(match[4]);
 
-                        // Handle Game Name and Version tracking
                         if (metaMatch) {
                             let importedMeta = JSON.parse(metaMatch[1]);
                             document.getElementById('game-name-input').value = importedMeta.name || "My Epic Quest";
-                            // Set the editor's current version to 1 higher than the file it just loaded
                             gameVersion = (importedMeta.version !== undefined ? parseInt(importedMeta.version) : 0) + 1;
                         } else {
-                            // Backwards compatibility for your older saves that didn't have versions
                             gameVersion = 1; 
                         }
 
@@ -1631,5 +1618,4 @@
         renderVicLists(); updateAliases(); updatePlayerStats(); drawMap();
     </script>
 </body>
-
 </html>
