@@ -1,0 +1,1634 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Text RPG Visual Editor</title>
+    <style>
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; margin: 0; padding: 0; display: flex; height: 100vh; background-color: #1e1e2e; color: #cdd6f4; }
+        .panel { padding: 20px; box-sizing: border-box; display: flex; flex-direction: column; gap: 15px; }
+        
+        #editor-panel { width: 380px; background-color: #181825; border-right: 2px solid #313244; overflow-y: auto; }
+        #editor-panel input[type="text"], #editor-panel input[type="number"], #editor-panel textarea, #editor-panel select { width: 100%; padding: 8px; margin-top: 5px; background: #313244; color: #cdd6f4; border: 1px solid #45475a; border-radius: 4px; box-sizing: border-box;}
+        #editor-panel button { background: #89b4fa; color: #11111b; border: none; padding: 10px; cursor: pointer; border-radius: 4px; font-weight: bold; width: 100%; margin-top: 10px;}
+        #editor-panel button:hover { background: #b4befe; }
+        .hidden { display: none !important; }
+        .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+
+        #map-panel { flex-grow: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; position: relative; overflow: hidden; }
+        canvas { background-color: #313244; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.3); cursor: crosshair; }
+        .map-instructions { position: absolute; top: 20px; color: #a6adc8; pointer-events: none; text-align: center; }
+
+        #player-panel { width: 360px; background-color: #181825; border-left: 2px solid #313244; display: flex; flex-direction: column; }
+        #game-output { flex-grow: 1; background: #11111b; padding: 15px; overflow-y: auto; font-family: 'Courier New', Courier, monospace; margin-bottom: 10px; border-radius: 4px; border: 1px solid #313244;}
+        
+        #parser-ui { display: flex; gap: 10px; margin-bottom: 15px; }
+        #parser-ui input { flex-grow: 1; padding: 10px; background: #313244; color: #a6e3a1; border: 1px solid #45475a; border-radius: 4px; font-family: 'Courier New', Courier, monospace; font-weight: bold;}
+        #parser-ui button { background: #a6e3a1; color: #11111b; border: none; padding: 10px 15px; cursor: pointer; border-radius: 4px; font-weight: bold; }
+        
+        #player-status { display: flex; justify-content: space-between; background: #313244; padding: 10px; border-radius: 4px; margin-bottom: 10px; font-weight: bold; color: #f9e2af; font-size: 0.9em; align-items: center;}
+
+        hr { border: 1px solid #45475a; width: 100%; margin: 5px 0; }
+        
+        .list-item { background: #313244; padding: 8px; border-radius: 4px; margin-top: 5px; display: flex; justify-content: space-between; align-items: center; font-size: 0.9em; }
+        .list-item .btn-group { display: flex; gap: 5px; }
+        .list-item button { width: auto; margin: 0; padding: 4px 8px; font-size: 0.8em; }
+        .btn-edit { background: #89b4fa !important; color: #11111b !important; }
+        .btn-del { background: #f38ba8 !important; color: #11111b !important; }
+        .btn-cancel { background: #45475a !important; color: #cdd6f4 !important; }
+
+        /* Dialogue Tree CSS */
+        .diag-thread { margin-left: 10px; border-left: 2px solid #585b70; padding-left: 10px; margin-top: 8px; }
+        .diag-thread-player { border-left-color: #a6e3a1; }
+        .diag-npc-label { color: #89b4fa; font-weight: bold; font-size: 0.8em; margin-bottom: 2px;}
+        .diag-player-label { color: #a6e3a1; font-weight: bold; font-size: 0.8em; margin-bottom: 2px; display:flex; justify-content: space-between; align-items: center;}
+        .diag-input { padding: 4px !important; font-size: 0.85em !important; margin-top: 0 !important; }
+        
+        .room-image { max-width: 100%; border-radius: 4px; margin-top: 5px; margin-bottom: 5px; border: 1px solid #45475a; }
+
+        /* Room Editor Tabs */
+        .tab-container { display: flex; gap: 5px; margin-bottom: 10px; margin-top: 5px; }
+        .tab-container button { flex-grow: 1; margin: 0 !important; padding: 8px !important; font-size: 0.85em; background: #45475a; color: #cdd6f4; border-radius: 4px 4px 0 0; }
+        .tab-container button.active { background: #89b4fa !important; color: #11111b !important; }
+        .room-tab-content { display: flex; flex-direction: column; }
+
+        /* Collapsible Headers */
+        .collapse-header { margin: 5px 0; font-size: 1.1em; cursor: pointer; display: flex; justify-content: space-between; align-items: center; padding: 5px; border-radius: 4px; transition: background 0.2s; }
+        .collapse-header:hover { background: #313244; }
+        .color-player { color: #a6e3a1; }
+        .color-vic { color: #f9e2af; }
+        .color-dict { color: #cba6f7; }
+    </style>
+</head>
+<body>
+
+    <audio id="bg-music" loop style="display:none;"></audio>
+
+    <div id="editor-panel" class="panel">
+        <h2 style="margin: 0;">RPG Builder</h2>
+        <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px;">
+            <button onclick="newGame()">New</button>
+            <button onclick="document.getElementById('import-file').click()" style="background: #f9e2af; color: #11111b;">📂 Import</button>
+            <button onclick="triggerExport()" style="background: #a6e3a1; color: #11111b;">💾 Export</button>
+        </div>
+        <input type="file" id="import-file" accept=".html" style="display: none;" onchange="importGame(event)">
+        <label style="font-size: 0.9em; margin-top: 10px; display: block;">Game Name: <input type="text" id="game-name-input" value="My Epic Quest"></label>
+        
+        <hr>
+        
+        <hr>
+        
+        <h3 class="collapse-header color-player" onclick="toggleSection('player')">Player Settings <span id="icon-player">▶</span></h3>
+        <div id="section-player" class="hidden">
+            <div class="grid-2">
+                <label style="font-size: 0.9em;">Max HP: <input type="number" id="player-hp" value="100" oninput="updatePlayerStats()"></label>
+                <label style="font-size: 0.9em;">Dmg (Min-Max): <div style="display:flex; gap:5px;"><input type="number" id="player-min-dmg" value="5" oninput="updatePlayerStats()"><input type="number" id="player-max-dmg" value="15" oninput="updatePlayerStats()"></div></label>
+            </div>
+            <div class="grid-2">
+                <label style="font-size: 0.9em;">Wisdom: <input type="number" id="player-wis" value="0" oninput="updatePlayerStats()"></label>
+                <label style="font-size: 0.9em;">Stealth: <input type="number" id="player-stl" value="0" oninput="updatePlayerStats()"></label>
+            </div>
+            <label style="font-size: 0.9em;">Charisma: <input type="number" id="player-cha" value="0" oninput="updatePlayerStats()"></label>
+            <label style="font-size: 0.9em;">Attack Msgs: <input type="text" id="player-atk-msgs" value="You strike the {target} hard! | You slash at the {target}!" oninput="updatePlayerStats()"></label>
+            <label style="font-size: 0.9em;">Death Msgs: <input type="text" id="player-death-msgs" value="You collapse to the ground, dead. | The world fades to black..." oninput="updatePlayerStats()"></label>
+        </div>
+
+        <hr>
+
+        <h3 class="collapse-header color-vic" onclick="toggleSection('vic')">Victory Conditions <span id="icon-vic">▶</span></h3>
+        <div id="section-vic" class="hidden">
+            <label style="font-size: 0.9em;">Must be in Room: <select id="vic-room" onchange="updateVictory()"><option value="none">Any Room</option></select></label>
+            
+            <div style="margin-top:5px; font-size:0.9em;">Require Item(s):
+                <div style="display:flex; gap:5px; margin-top:2px;">
+                    <input type="text" id="vic-item-input" placeholder="e.g. Holy Grail">
+                    <button onclick="addVicItem()" style="margin:0; padding:5px 10px; background:#f9e2af; color:#11111b;">Add</button>
+                </div>
+            </div>
+            <div id="vic-items-list" style="margin-bottom:5px; font-size:0.8em; color:#bac2de;">None</div>
+
+            <div style="margin-top:5px; font-size:0.9em;">Require Dead NPC(s):
+                <div style="display:flex; gap:5px; margin-top:2px;">
+                    <input type="text" id="vic-npc-input" placeholder="e.g. Dragon">
+                    <button onclick="addVicNPC()" style="margin:0; padding:5px 10px; background:#f38ba8; color:#11111b;">Add</button>
+                </div>
+            </div>
+            <div id="vic-npcs-list" style="margin-bottom:5px; font-size:0.8em; color:#bac2de;">None</div>
+
+            <label style="font-size: 0.9em;">Victory Message:
+                <textarea id="vic-msg" rows="2" oninput="updateVictory()">You have achieved victory!</textarea>
+            </label>
+        </div>
+
+        <hr>
+
+        <h3 class="collapse-header color-dict" onclick="toggleSection('dict')">Command Dictionary <span id="icon-dict">▶</span></h3>
+        <div id="section-dict" class="hidden">
+            <div class="grid-2">
+                <label style="font-size: 0.9em;">North: <input type="text" id="alias-North" value="n, north, go north" oninput="updateAliases()"></label>
+                <label style="font-size: 0.9em;">South: <input type="text" id="alias-South" value="s, south, go south" oninput="updateAliases()"></label>
+                <label style="font-size: 0.9em;">East: <input type="text" id="alias-East" value="e, east, go east" oninput="updateAliases()"></label>
+                <label style="font-size: 0.9em;">West: <input type="text" id="alias-West" value="w, west, go west" oninput="updateAliases()"></label>
+            </div>
+            <div class="grid-2" style="margin-top: 5px;">
+                <label style="font-size: 0.9em;">Look: <input type="text" id="alias-look" value="l, look" oninput="updateAliases()"></label>
+                <label style="font-size: 0.9em;">Inv: <input type="text" id="alias-inv" value="i, inv, inventory" oninput="updateAliases()"></label>
+                <label style="font-size: 0.9em;">Take: <input type="text" id="alias-take" value="take, get, grab" oninput="updateAliases()"></label>
+                <label style="font-size: 0.9em;">Drop: <input type="text" id="alias-drop" value="drop, discard" oninput="updateAliases()"></label>
+                <label style="font-size: 0.9em;">Use: <input type="text" id="alias-use" value="use, equip" oninput="updateAliases()"></label>
+                <label style="font-size: 0.9em;">Attack: <input type="text" id="alias-attack" value="attack, hit, fight" oninput="updateAliases()"></label>
+                <label style="font-size: 0.9em;">Give: <input type="text" id="alias-give" value="give, hand" oninput="updateAliases()"></label>
+                <label style="font-size: 0.9em;">Talk: <input type="text" id="alias-talk" value="talk, speak, chat" oninput="updateAliases()"></label>
+            </div>
+        </div>
+        
+        <hr>
+
+        <div id="room-editor" class="hidden">
+            <h3 id="room-header-title" style="margin: 5px 0 0 0; font-size: 1.1em; color: #f9e2af;">Edit Room</h3>
+            
+            <div class="tab-container">
+                <button id="btn-tab-settings" class="active" onclick="switchRoomTab('settings')">Settings</button>
+                <button id="btn-tab-entities" onclick="switchRoomTab('entities')">Entities</button>
+                <button id="btn-tab-items" onclick="switchRoomTab('items')">Items</button>
+            </div>
+
+            <div id="tab-settings" class="room-tab-content">
+                <label>Name: <input type="text" id="room-name" oninput="updateRoom()"></label>
+                <label>Description: <textarea id="room-desc" rows="3" oninput="updateRoom()"></textarea></label>
+                
+                <div class="grid-2">
+                    <label style="font-size:0.9em;">Music Path: <input type="text" id="room-music" placeholder="music/cave.mp3" oninput="updateRoom()"></label>
+                    <label style="font-size:0.9em;">Image Path: <input type="text" id="room-image" placeholder="images/cave.jpg" oninput="updateRoom()"></label>
+                </div>
+                
+                <label style="font-size: 0.95em; display:block; margin-top:8px; color:#a6e3a1;">
+                    <input type="checkbox" id="room-checkpoint" onchange="updateRoom()"> <strong>Is Checkpoint Room</strong>
+                </label>
+
+                <div style="background:#11111b; padding:10px; border-radius:4px; margin-top:10px; border:1px solid #45475a;">
+                    <h4 style="margin:0 0 5px 0; color:#cba6f7;">Custom Room Event</h4>
+                    <label style="font-size: 0.85em;">Trigger Command(s): <input type="text" id="room-event-cmd" placeholder="e.g. sleep, go to bed" oninput="updateRoom()"></label>
+                    <label style="font-size: 0.85em;">Event Message: <textarea id="room-event-msg" rows="2" placeholder="You fall asleep..." oninput="updateRoom()"></textarea></label>
+                    <div class="grid-2">
+                        <label style="font-size: 0.85em;">Teleport To: <select id="room-event-move" onchange="updateRoom()"><option value="">None</option></select></label>
+                        <label style="font-size: 0.85em; display:flex; align-items:center; margin-top:15px;"><input type="checkbox" id="room-event-reveal" onchange="updateRoom()"> Reveal Hidden NPCs</label>
+                    </div>
+                </div>
+                
+                <h3 style="margin: 10px 0 5px 0; font-size: 1.1em; color: #89b4fa;">Add Exit</h3>
+                <div style="display: flex; gap: 5px; margin-bottom: 5px;">
+                    <select id="exit-dir" style="width: 40%;"><option value="North">North</option><option value="South">South</option><option value="East">East</option><option value="West">West</option></select>
+                    <select id="exit-target" style="width: 60%;"></select>
+                </div>
+                <input type="text" id="exit-key" placeholder="Required Key (Leave blank if open)">
+                <button onclick="addExit()" style="margin-top: 5px;">Link Room</button>
+                <div id="current-exits" style="margin-top:10px; font-size: 0.8em; color: #bac2de;"></div>
+
+                <button onclick="deleteRoom()" style="background: #45475a; color: #f38ba8; margin-top: 30px;">Delete Room</button>
+            </div>
+
+            <div id="tab-entities" class="room-tab-content hidden">
+                <label style="font-size: 0.9em;">Name: <input type="text" id="npc-name"></label>
+                <label style="font-size: 0.9em;">Desc: <input type="text" id="npc-desc"></label>
+                
+                <div class="grid-2">
+                    <label style="font-size: 0.9em;">HP: <input type="number" id="npc-hp" value="20"></label>
+                    <label style="font-size: 0.9em;">Dmg (Min-Max): <div style="display:flex; gap:5px;"><input type="number" id="npc-min-dmg" value="2"><input type="number" id="npc-max-dmg" value="6"></div></label>
+                </div>
+                <div class="grid-2">
+                    <label style="font-size: 0.9em;">XP Drop (Min-Max): <div style="display:flex; gap:5px;"><input type="number" id="npc-min-xp" value="2"><input type="number" id="npc-max-xp" value="5"></div></label>
+                    <div style="display:flex; flex-direction:column; gap:5px;">
+                        <label style="font-size: 0.9em;">Friendliness: <input type="number" id="npc-friend" value="25" min="1" max="100"></label>
+                        <label style="font-size: 0.9em; color:#a6adc8;"><input type="checkbox" id="npc-hidden"> Hidden (Wait for Event)</label>
+                    </div>
+                </div>
+
+                <label style="font-size: 0.9em;">Attack Msgs: <input type="text" id="npc-atk-msgs" value="The {npc} slashes at you!"></label>
+                <label style="font-size: 0.9em;">Death Msgs: <input type="text" id="npc-death-msgs" value="The {npc} shrieks and dies."></label>
+                
+                <div id="dialogue-editor-container" class="hidden" style="background:#11111b; padding:10px; border-radius:4px; margin-top:10px; border:1px solid #45475a;">
+                    <h4 style="margin:0 0 10px 0; color:#cba6f7;">Dialogue Tree</h4>
+                    <div id="dialogue-tree-render"></div>
+                    <button id="btn-init-dialogue" onclick="initDialogue()" style="background:#cba6f7; color:#11111b; padding:5px; font-size:0.8em; width:100%; margin-top:5px; cursor:pointer; border:none; border-radius:3px;">Create Dialogue Tree</button>
+                </div>
+
+                <div class="grid-2">
+                    <button id="btn-add-npc" onclick="saveNPC()" style="background: #f38ba8;">Add Entity</button>
+                    <button id="btn-cancel-npc" onclick="cancelNPCEdit()" class="btn-cancel hidden">Cancel</button>
+                </div>
+                <div id="current-npcs" style="margin-top:10px; font-size: 0.9em; color: #bac2de;"></div>
+            </div>
+
+            <div id="tab-items" class="room-tab-content hidden">
+                <label style="font-size: 0.9em;">Name: <input type="text" id="item-name"></label>
+                <label style="font-size: 0.9em;">Desc: <input type="text" id="item-desc"></label>
+                <label style="font-size: 0.9em; color: #a6e3a1;">Placement: <select id="item-placement"><option value="floor">On Floor</option></select></label>
+                <div class="grid-2">
+                    <label style="font-size: 0.9em;">Type: <select id="item-type"><option value="equipment">Equipment (Passive)</option><option value="consumable">Consumable (Use)</option></select></label>
+                    <label style="font-size: 0.9em;">Duration: <input type="number" id="item-duration" value="0" title="0 = Permanent"></label>
+                </div>
+                <div class="grid-2">
+                    <label style="font-size: 0.9em;">HP Effect: <input type="number" id="item-hp" value="0"></label>
+                    <label style="font-size: 0.9em;">Dmg Effect: <input type="number" id="item-dmg" value="0"></label>
+                </div>
+                <div class="grid-2">
+                    <button id="btn-add-item" onclick="saveItem()" style="background: #f9e2af; color: #11111b;">Add Item</button>
+                    <button id="btn-cancel-item" onclick="cancelItemEdit()" class="btn-cancel hidden">Cancel</button>
+                </div>
+                <div id="current-items" style="margin-top:10px; font-size: 0.9em; color: #bac2de;"></div>
+            </div>
+        </div>
+        <div id="no-selection">
+            <p style="color: #a6adc8;">Click the map to create or select a room to edit.</p>
+        </div>
+    </div>
+
+    <div id="map-panel" class="panel">
+        <div class="map-instructions">Left-click: Add/Edit.<br>Right-click & Drag: Pan. Scroll: Zoom.</div>
+        <canvas id="mapCanvas" width="800" height="800"></canvas>
+    </div>
+
+    <div id="player-panel" class="panel">
+        <h2 style="margin: 0;">Test Runner</h2>
+        <button onclick="triggerStartTest()" style="background: #89b4fa; color:#11111b; border:none; padding:10px; border-radius:4px; font-weight:bold; cursor:pointer;">▶ Run Game</button>
+        
+        <div id="player-status" class="hidden">
+            <span id="ui-lvl" style="color: #cba6f7;">Lvl: 1 (0/10 XP)</span>
+            <span id="ui-hp">HP: 100/100</span>
+            <span id="ui-dmg">Dmg: 5-15</span>
+        </div>
+
+        <div id="game-output">Game output will appear here...</div>
+        <div id="parser-ui">
+            <input type="text" id="cmd-input" placeholder="Action..." autocomplete="off" onkeydown="if(event.key === 'Enter') parseCommand()">
+            <button onclick="parseCommand()">Send</button>
+        </div>
+    </div>
+
+    <script>
+        let rooms = {}; let playRooms = {}; let roomIdCounter = 1; let selectedRoomId = null; let playCurrentRoomId = null;
+        let aliases = {}; let editingNpcIdx = null; let editingItemInfo = null;
+        
+        let playerStats = { hp: 100, maxHp: 100, minDmg: 5, maxDmg: 15, wisdom: 0, stealth: 0, charisma: 0, atkMsgs: [], deathMsgs: [], level: 1, xp: 0, xpNeeded: 10 };
+        
+        let playerInventory = []; let activeEffects = []; let gameWon = false;
+        let activeDialogue = null; let tempDialogueTree = null; let isHidden = false; let isLevelingUp = false;
+        let checkpointState = null; 
+
+        let victoryConditions = { targetRoomId: 'none', requiredItems: [], deadNPCs: [], victoryMessage: "You have achieved victory!" };
+        let mapZoom = 1.0; let mapOffsetX = 0; let mapOffsetY = 0; let isDragging = false; let dragStartX = 0; let dragStartY = 0;
+		let gameVersion = 0;
+		let mapZoom = 1.0; let mapOffsetX = 0; let mapOffsetY = 0; let isDragging = false; let dragStartX = 0; let dragStartY = 0;
+        let gameVersion = 0;
+        let currentFileHandle = null;
+        const canvas = document.getElementById('mapCanvas'); const ctx = canvas.getContext('2d');
+        const roomEditor = document.getElementById('room-editor'); const noSelection = document.getElementById('no-selection');
+        const roomHeaderTitle = document.getElementById('room-header-title');
+        const nameInput = document.getElementById('room-name'); const descInput = document.getElementById('room-desc'); 
+        const musicInput = document.getElementById('room-music'); const imageInput = document.getElementById('room-image');
+        const exitTargetSelect = document.getElementById('exit-target'); const currentExitsDiv = document.getElementById('current-exits');
+        const bgMusic = document.getElementById('bg-music'); let currentMusicUrl = "";
+        const currentNpcsDiv = document.getElementById('current-npcs'); const currentItemsDiv = document.getElementById('current-items');
+        const placementSelect = document.getElementById('item-placement');
+        const gameOutput = document.getElementById('game-output'); const cmdInput = document.getElementById('cmd-input');
+        const playerStatusUI = document.getElementById('player-status'); 
+        const uiHp = document.getElementById('ui-hp'); const uiDmg = document.getElementById('ui-dmg'); const uiLvl = document.getElementById('ui-lvl');
+        
+        const dialogueEditorContainer = document.getElementById('dialogue-editor-container');
+        const dialogueTreeRender = document.getElementById('dialogue-tree-render');
+        const btnInitDialogue = document.getElementById('btn-init-dialogue');
+
+        function toggleSection(sec) {
+            const el = document.getElementById('section-' + sec);
+            const icon = document.getElementById('icon-' + sec);
+            if (el.classList.contains('hidden')) {
+                el.classList.remove('hidden'); icon.innerText = '▼';
+            } else {
+                el.classList.add('hidden'); icon.innerText = '▶';
+            }
+        }
+
+        function switchRoomTab(tabName) {
+            document.querySelectorAll('.room-tab-content').forEach(el => el.classList.add('hidden'));
+            document.querySelectorAll('.tab-container button').forEach(el => el.classList.remove('active'));
+            document.getElementById('tab-' + tabName).classList.remove('hidden');
+            document.getElementById('btn-tab-' + tabName).classList.add('active');
+        }
+
+        function updateAliases() {
+            const actions = ['North', 'South', 'East', 'West', 'look', 'inv', 'take', 'drop', 'use', 'attack', 'give', 'talk'];
+            actions.forEach(act => {
+                const el = document.getElementById('alias-' + act);
+                if (el) aliases[act] = el.value.split(',').map(s => s.trim().toLowerCase()).filter(s => s);
+            });
+        }
+
+        function updatePlayerStats() {
+            playerStats.maxHp = parseInt(document.getElementById('player-hp').value) || 100;
+            playerStats.minDmg = parseInt(document.getElementById('player-min-dmg').value) || 1;
+            playerStats.maxDmg = parseInt(document.getElementById('player-max-dmg').value) || 2;
+            playerStats.wisdom = parseInt(document.getElementById('player-wis').value) || 0;
+            playerStats.stealth = parseInt(document.getElementById('player-stl').value) || 0;
+            playerStats.charisma = parseInt(document.getElementById('player-cha').value) || 0;
+            playerStats.atkMsgs = document.getElementById('player-atk-msgs').value.split('|').map(s => s.trim());
+            playerStats.deathMsgs = document.getElementById('player-death-msgs').value.split('|').map(s => s.trim());
+        }
+
+        function updateVictory() {
+            victoryConditions.targetRoomId = document.getElementById('vic-room').value;
+            victoryConditions.victoryMessage = document.getElementById('vic-msg').value;
+        }
+
+        function addVicItem() { let val = document.getElementById('vic-item-input').value.trim(); if(val && !victoryConditions.requiredItems.includes(val)) { victoryConditions.requiredItems.push(val); document.getElementById('vic-item-input').value = ''; renderVicLists(); } }
+        function removeVicItem(idx) { victoryConditions.requiredItems.splice(idx,1); renderVicLists(); }
+        function addVicNPC() { let val = document.getElementById('vic-npc-input').value.trim(); if(val && !victoryConditions.deadNPCs.includes(val)) { victoryConditions.deadNPCs.push(val); document.getElementById('vic-npc-input').value = ''; renderVicLists(); } }
+        function removeVicNPC(idx) { victoryConditions.deadNPCs.splice(idx,1); renderVicLists(); }
+        
+        function renderVicLists() {
+            let iList = document.getElementById('vic-items-list'); iList.innerHTML = victoryConditions.requiredItems.length ? '' : 'None';
+            victoryConditions.requiredItems.forEach((it, idx) => iList.innerHTML += `<div style="display:flex; justify-content:space-between;">- ${it} <button onclick="removeVicItem(${idx})" style="background:none;color:#f38ba8;border:none;cursor:pointer;padding:0;">[x]</button></div>`);
+            let nList = document.getElementById('vic-npcs-list'); nList.innerHTML = victoryConditions.deadNPCs.length ? '' : 'None';
+            victoryConditions.deadNPCs.forEach((npc, idx) => nList.innerHTML += `<div style="display:flex; justify-content:space-between;">- ${npc} <button onclick="removeVicNPC(${idx})" style="background:none;color:#f38ba8;border:none;cursor:pointer;padding:0;">[x]</button></div>`);
+        }
+
+        function newGame() {
+            if(confirm("Wipe everything and start fresh?")) {
+                rooms = {}; roomIdCounter = 1; selectedRoomId = null; playCurrentRoomId = null;
+                checkpointState = null; gameVersion = 0; currentFileHandle = null;
+                document.getElementById('game-name-input').value = "My Epic Quest";
+                bgMusic.pause(); bgMusic.removeAttribute('src'); bgMusic.load(); currentMusicUrl = "";
+                victoryConditions = { targetRoomId: 'none', requiredItems: [], deadNPCs: [], victoryMessage: "You have achieved victory!" };
+                document.getElementById('vic-msg').value = victoryConditions.victoryMessage;
+                renderVicLists(); cancelNPCEdit(); cancelItemEdit();
+                updateEditorUI(); drawMap(); logGame("Game reset. Ready to build."); playerStatusUI.classList.add('hidden');
+            }
+        }
+
+        // Prevent right click menu
+        canvas.addEventListener('contextmenu', e => e.preventDefault());
+
+        canvas.addEventListener('mousedown', (e) => {
+            if (e.button === 2) { 
+                isDragging = true; dragStartX = e.clientX - mapOffsetX; dragStartY = e.clientY - mapOffsetY; return;
+            }
+            const rect = canvas.getBoundingClientRect(); 
+            const x = (e.clientX - rect.left - mapOffsetX) / mapZoom; const y = (e.clientY - rect.top - mapOffsetY) / mapZoom;
+            let clickedRoomId = null;
+            for (const id in rooms) { if (x >= rooms[id].x - 20 && x <= rooms[id].x + 20 && y >= rooms[id].y - 20 && y <= rooms[id].y + 20) { clickedRoomId = id; break; } }
+            cancelNPCEdit(); cancelItemEdit();
+            if (clickedRoomId) { selectedRoomId = clickedRoomId; } 
+            else { const newId = roomIdCounter++; rooms[newId] = { id: newId, name: `Room ${newId}`, description: "You are standing in a new area.", x: x, y: y, exits: {}, locks: {}, npcs: [], items: [], isCheckpoint: false, eventCmd: "", eventMsg: "", eventMove: "", eventReveal: false }; selectedRoomId = newId; }
+            updateEditorUI(); drawMap();
+        });
+
+        canvas.addEventListener('mousemove', (e) => { if (isDragging) { mapOffsetX = e.clientX - dragStartX; mapOffsetY = e.clientY - dragStartY; drawMap(); } });
+        canvas.addEventListener('mouseup', (e) => { if (e.button === 2) isDragging = false; });
+        canvas.addEventListener('mouseleave', () => { isDragging = false; });
+        canvas.addEventListener('wheel', (e) => { e.preventDefault(); if (e.deltaY < 0) { mapZoom += 0.1; } else { mapZoom -= 0.1; } mapZoom = Math.max(0.3, Math.min(mapZoom, 3.0)); drawMap(); });
+
+        function drawMap() {
+            ctx.clearRect(0, 0, canvas.width, canvas.height); 
+            ctx.save(); ctx.translate(mapOffsetX, mapOffsetY); ctx.scale(mapZoom, mapZoom); 
+            ctx.lineWidth = 2;
+            for (const id in rooms) {
+                for (const dir in rooms[id].exits) {
+                    const targetRoom = rooms[rooms[id].exits[dir]];
+                    if (targetRoom) {
+                        ctx.beginPath(); ctx.strokeStyle = '#89b4fa'; ctx.moveTo(rooms[id].x, rooms[id].y); ctx.lineTo(targetRoom.x, targetRoom.y); ctx.stroke();
+                        ctx.fillStyle = '#89b4fa'; ctx.fillText(dir[0], (rooms[id].x + targetRoom.x) / 2, (rooms[id].y + targetRoom.y) / 2 - 5);
+                    }
+                }
+            }
+            for (const id in rooms) {
+                ctx.fillStyle = (id == playCurrentRoomId) ? '#a6e3a1' : (id == selectedRoomId ? '#f9e2af' : '#cba6f7');
+                ctx.fillRect(rooms[id].x - 20, rooms[id].y - 20, 40, 40); ctx.strokeStyle = '#11111b'; ctx.strokeRect(rooms[id].x - 20, rooms[id].y - 20, 40, 40);
+                if (rooms[id].isCheckpoint) { ctx.fillStyle = '#11111b'; ctx.font = "14px Arial"; ctx.fillText("★", rooms[id].x, rooms[id].y + 5); }
+                ctx.fillStyle = '#cdd6f4'; ctx.font = "12px Arial"; ctx.textAlign = "center"; ctx.fillText(rooms[id].name, rooms[id].x, rooms[id].y - 25);
+            }
+            ctx.restore();
+        }
+
+        function updateEditorUI() {
+            let vicRoom = document.getElementById('vic-room'); let currentVicRoom = victoryConditions.targetRoomId;
+            vicRoom.innerHTML = '<option value="none">Any Room</option>';
+            for(let id in rooms) { vicRoom.innerHTML += `<option value="${id}">${rooms[id].name}</option>`; }
+            vicRoom.value = rooms[currentVicRoom] ? currentVicRoom : 'none';
+
+            if (!selectedRoomId || !rooms[selectedRoomId]) { roomEditor.classList.add('hidden'); noSelection.classList.remove('hidden'); return; }
+            roomEditor.classList.remove('hidden'); noSelection.classList.add('hidden');
+
+            const room = rooms[selectedRoomId]; if(!room.locks) room.locks = {};
+            roomHeaderTitle.innerText = `Edit Room (ID: ${selectedRoomId})`;
+            nameInput.value = room.name; descInput.value = room.description; 
+            musicInput.value = room.music || ''; imageInput.value = room.image || '';
+            document.getElementById('room-checkpoint').checked = !!room.isCheckpoint;
+
+            // Load Events UI
+            document.getElementById('room-event-cmd').value = room.eventCmd || '';
+            document.getElementById('room-event-msg').value = room.eventMsg || '';
+            document.getElementById('room-event-reveal').checked = !!room.eventReveal;
+
+            exitTargetSelect.innerHTML = '';
+            let eventMoveSelect = document.getElementById('room-event-move');
+            eventMoveSelect.innerHTML = '<option value="">None</option>';
+
+            for (const id in rooms) { 
+                if (id != selectedRoomId) { 
+                    const opt = document.createElement('option'); opt.value = id; opt.textContent = rooms[id].name; exitTargetSelect.appendChild(opt); 
+                }
+                const evtOpt = document.createElement('option'); evtOpt.value = id; evtOpt.textContent = rooms[id].name; eventMoveSelect.appendChild(evtOpt); 
+            }
+            eventMoveSelect.value = room.eventMove || '';
+
+            currentExitsDiv.innerHTML = '<strong>Current Exits:</strong><br>'; let exitCount = 0;
+            for (const dir in room.exits) {
+                const targetId = room.exits[dir];
+                if(rooms[targetId]) { 
+                    let lockHTML = room.locks[dir] ? ` <span style="color:#f38ba8">[Locked: ${room.locks[dir]}]</span>` : "";
+                    currentExitsDiv.innerHTML += `- ${dir} to ${rooms[targetId].name}${lockHTML} <button onclick="deleteExit('${dir}')" style="background:none; border:none; color:#f38ba8; cursor:pointer; padding:0;">[x]</button><br>`; 
+                    exitCount++; 
+                }
+            }
+            if (exitCount === 0) currentExitsDiv.innerHTML += "None.";
+
+            placementSelect.innerHTML = '<option value="floor">On Floor</option>';
+            if (room.npcs && room.npcs.length > 0) { room.npcs.forEach((npc, index) => { placementSelect.innerHTML += `<option value="${index}">NPC: ${npc.name}</option>`; }); }
+            if(editingItemInfo) { placementSelect.value = editingItemInfo.isNpc ? editingItemInfo.npcIdx.toString() : 'floor'; } else { placementSelect.value = 'floor'; }
+
+            currentItemsDiv.innerHTML = '<strong>Floor Items:</strong><br>';
+            if (!room.items) room.items = [];
+            if (room.items.length === 0) { currentItemsDiv.innerHTML += "None."; } 
+            else {
+                room.items.forEach((item, index) => {
+                    let tags = []; if(item.type === 'equipment') tags.push('Passive'); else tags.push(item.duration > 0 ? `${item.duration} Turns` : 'Use');
+                    currentItemsDiv.innerHTML += `<div class="list-item"><div><strong>${item.name}</strong> (${tags.join(', ')})</div><div class="btn-group"><button class="btn-edit" onclick="editItem(false, null, ${index})">Edit</button><button class="btn-del" onclick="deleteItem(${index})">X</button></div></div>`;
+                });
+            }
+
+            currentNpcsDiv.innerHTML = '<strong>Current Entities:</strong><br>';
+            if (!room.npcs) room.npcs = [];
+            if (room.npcs.length === 0) { currentNpcsDiv.innerHTML += "None."; } 
+            else {
+                room.npcs.forEach((npc, index) => {
+                    let baseDisp = getEffectiveDisposition(npc, 0); 
+                    let dispColor = baseDisp === 'Hostile' ? '#f38ba8' : (baseDisp === 'Friendly' ? '#a6e3a1' : '#bac2de');
+                    let hiddenTag = npc.isHidden ? ' <span style="color:#a6adc8">[HIDDEN]</span>' : '';
+                    let npcHTML = `<div class="list-item" style="flex-direction:column; align-items:stretch; gap:5px;"><div style="display:flex; justify-content:space-between;"><div><span style="color:${dispColor}">[${baseDisp[0]}]</span> <strong>${npc.name}</strong>${hiddenTag}</div><div class="btn-group"><button class="btn-edit" onclick="editNPC(${index})">Edit</button><button class="btn-del" onclick="deleteNPC(${index})">X</button></div></div>`;
+                    if (npc.items && npc.items.length > 0) {
+                        npc.items.forEach((it, iIdx) => { npcHTML += `<div style="font-size:0.8em; color:#f9e2af; display:flex; justify-content:space-between; margin-left:15px; align-items:center;">- ${it.name} <div class="btn-group"><button class="btn-edit" onclick="editItem(true, ${index}, ${iIdx})">Edit</button><button class="btn-del" onclick="deleteNPCItem(${index}, ${iIdx})">X</button></div></div>`; });
+                    }
+                    npcHTML += `</div>`; currentNpcsDiv.innerHTML += npcHTML;
+                });
+            }
+        }
+
+        function updateRoom() { 
+            if (selectedRoomId && rooms[selectedRoomId]) { 
+                rooms[selectedRoomId].name = nameInput.value; 
+                rooms[selectedRoomId].description = descInput.value; 
+                rooms[selectedRoomId].music = musicInput.value.trim(); 
+                rooms[selectedRoomId].image = imageInput.value.trim(); 
+                rooms[selectedRoomId].isCheckpoint = document.getElementById('room-checkpoint').checked;
+                rooms[selectedRoomId].eventCmd = document.getElementById('room-event-cmd').value.trim();
+                rooms[selectedRoomId].eventMsg = document.getElementById('room-event-msg').value.trim();
+                rooms[selectedRoomId].eventMove = document.getElementById('room-event-move').value;
+                rooms[selectedRoomId].eventReveal = document.getElementById('room-event-reveal').checked;
+                drawMap(); 
+            } 
+        }
+        
+        function addExit() {
+            const dir = document.getElementById('exit-dir').value; const targetId = exitTargetSelect.value; const reqKey = document.getElementById('exit-key').value.trim();
+            if (selectedRoomId && targetId) {
+                rooms[selectedRoomId].exits[dir] = targetId; if(!rooms[selectedRoomId].locks) rooms[selectedRoomId].locks = {};
+                if(reqKey) rooms[selectedRoomId].locks[dir] = reqKey; else delete rooms[selectedRoomId].locks[dir];
+                const revDirs = {"North":"South", "South":"North", "East":"West", "West":"East"};
+                if(rooms[targetId] && !rooms[targetId].exits[revDirs[dir]]) rooms[targetId].exits[revDirs[dir]] = selectedRoomId;
+                document.getElementById('exit-key').value = ''; updateEditorUI(); drawMap();
+            }
+        }
+        function deleteExit(dir) { if (!selectedRoomId) return; delete rooms[selectedRoomId].exits[dir]; if (rooms[selectedRoomId].locks) delete rooms[selectedRoomId].locks[dir]; updateEditorUI(); drawMap(); }
+
+        // --- DIALOGUE EDITOR LOGIC ---
+        function getDiagNodeByPath(pathStr) { let indices = pathStr.split(','); let curr = tempDialogueTree; for(let i of indices) { curr = curr.choices[parseInt(i)].nextNode; } return curr; }
+        function updateDiagNPC(pathStr, val) { let n = getDiagNodeByPath(pathStr); if(n) n.npcText = val; }
+        function updateDiagPlayer(pathStr, choiceIdx, val) { let n = getDiagNodeByPath(pathStr); if(n && n.choices[choiceIdx]) n.choices[choiceIdx].playerText = val; }
+        function updateDiagGive(pathStr, choiceIdx, val) { let n = getDiagNodeByPath(pathStr); if(n && n.choices[choiceIdx]) n.choices[choiceIdx].giveItems = val; }
+        function updateDiagAction(pathStr, choiceIdx, val) { let n = getDiagNodeByPath(pathStr); if(n && n.choices[choiceIdx]) n.choices[choiceIdx].npcAction = val; }
+        function updateDiagTarget(pathStr, choiceIdx, val) { let n = getDiagNodeByPath(pathStr); if(n && n.choices[choiceIdx]) n.choices[choiceIdx].actionTarget = val; }
+
+        function addDiagChoice(pathStr) { let n = getDiagNodeByPath(pathStr); if(n) { n.choices.push({ playerText: "New Reply", giveItems: "", npcAction: "none", actionTarget: "", nextNode: { npcText: "Response...", choices: [] } }); drawDialogueTree(); } }
+        function delDiagChoice(pathStr, choiceIdx) { let n = getDiagNodeByPath(pathStr); if(n) { n.choices.splice(choiceIdx, 1); drawDialogueTree(); } }
+
+        function buildDialogueHTML(node, pathStr) {
+            if (!node) return "";
+            let html = `<div class="diag-thread"><div class="diag-npc-label">NPC Text:</div><input class="diag-input" type="text" value="${node.npcText.replace(/"/g, '&quot;')}" oninput="updateDiagNPC('${pathStr}', this.value)">`;
+            if(node.choices && node.choices.length > 0) {
+                node.choices.forEach((choice, idx) => {
+                    let childPath = pathStr ? `${pathStr},${idx}` : `${idx}`;
+                    html += `<div class="diag-thread diag-thread-player"><div class="diag-player-label">Player Reply: <button class="btn-del" onclick="delDiagChoice('${pathStr}', ${idx})">X</button></div><input class="diag-input" type="text" value="${choice.playerText.replace(/"/g, '&quot;')}" oninput="updateDiagPlayer('${pathStr}', ${idx}, this.value)">`;
+                    html += `<div class="diag-npc-label" style="margin-top:4px; color:#a6adc8;">NPC Gives Item(s) (Comma separated):</div><input class="diag-input" type="text" placeholder="e.g. Health Potion" value="${(choice.giveItems||'').replace(/"/g, '&quot;')}" oninput="updateDiagGive('${pathStr}', ${idx}, this.value)">`;
+                    html += `<div class="diag-npc-label" style="margin-top:4px; color:#f38ba8;">Trigger Special Action:</div><div style="display:flex; gap:5px;"><select class="diag-input" onchange="updateDiagAction('${pathStr}', ${idx}, this.value)" style="width:40%;"><option value="none" ${choice.npcAction === 'none' ? 'selected' : ''}>None</option><option value="vanish" ${choice.npcAction === 'vanish' ? 'selected' : ''}>Vanish</option><option value="move" ${choice.npcAction === 'move' ? 'selected' : ''}>Move (Room ID)</option><option value="steal" ${choice.npcAction === 'steal' ? 'selected' : ''}>Steal (Item)</option><option value="attack" ${choice.npcAction === 'attack' ? 'selected' : ''}>Attack Player</option></select><input class="diag-input" type="text" placeholder="Target (Room ID or Item)" value="${(choice.actionTarget||'').replace(/"/g, '&quot;')}" oninput="updateDiagTarget('${pathStr}', ${idx}, this.value)" style="width:60%;"></div>`;
+                    html += `${buildDialogueHTML(choice.nextNode, childPath)}</div>`;
+                });
+            }
+            html += `<button onclick="addDiagChoice('${pathStr}')" style="background:#89b4fa; color:#11111b; margin-top:5px; padding:4px; font-size:0.8em; border-radius:3px; cursor:pointer; border:none;">+ Add Reply Option</button></div>`;
+            return html;
+        }
+
+        function drawDialogueTree() { if(tempDialogueTree) { btnInitDialogue.classList.add('hidden'); dialogueTreeRender.innerHTML = buildDialogueHTML(tempDialogueTree, ""); } else { btnInitDialogue.classList.remove('hidden'); dialogueTreeRender.innerHTML = ""; } }
+        function initDialogue() { tempDialogueTree = { npcText: "Greetings.", choices: [] }; drawDialogueTree(); }
+
+        function editNPC(index) {
+            if (!selectedRoomId) return; editingNpcIdx = index; let npc = rooms[selectedRoomId].npcs[index];
+            document.getElementById('npc-name').value = npc.name; document.getElementById('npc-desc').value = npc.description;
+            document.getElementById('npc-hp').value = npc.maxHp; document.getElementById('npc-min-dmg').value = npc.minDmg; document.getElementById('npc-max-dmg').value = npc.maxDmg;
+            document.getElementById('npc-friend').value = npc.friendliness !== undefined ? npc.friendliness : 25; 
+            document.getElementById('npc-min-xp').value = npc.minXp !== undefined ? npc.minXp : 2; document.getElementById('npc-max-xp').value = npc.maxXp !== undefined ? npc.maxXp : 5;
+            document.getElementById('npc-hidden').checked = !!npc.isHidden;
+            document.getElementById('npc-atk-msgs').value = npc.atkMsgs.join(' | '); document.getElementById('npc-death-msgs').value = npc.deathMsgs.join(' | ');
+            tempDialogueTree = npc.dialogue ? JSON.parse(JSON.stringify(npc.dialogue)) : null;
+            dialogueEditorContainer.classList.remove('hidden'); drawDialogueTree();
+            document.getElementById('btn-add-npc').innerText = 'Update Entity'; document.getElementById('btn-cancel-npc').classList.remove('hidden');
+        }
+
+        function cancelNPCEdit() {
+            editingNpcIdx = null; tempDialogueTree = null;
+            document.getElementById('npc-name').value = ''; document.getElementById('npc-desc').value = '';
+            document.getElementById('npc-hp').value = '20'; document.getElementById('npc-min-dmg').value = '2'; document.getElementById('npc-max-dmg').value = '6';
+            document.getElementById('npc-friend').value = '25'; document.getElementById('npc-min-xp').value = '2'; document.getElementById('npc-max-xp').value = '5';
+            document.getElementById('npc-hidden').checked = false;
+            document.getElementById('npc-atk-msgs').value = 'The {npc} slashes at you!'; document.getElementById('npc-death-msgs').value = 'The {npc} shrieks and dies.';
+            dialogueEditorContainer.classList.add('hidden'); dialogueTreeRender.innerHTML = '';
+            document.getElementById('btn-add-npc').innerText = 'Add Entity'; document.getElementById('btn-cancel-npc').classList.add('hidden');
+        }
+
+        function saveNPC() {
+            if (!selectedRoomId) return; const name = document.getElementById('npc-name').value.trim(); if (!name) return; 
+            let newNpc = {
+                name: name, description: document.getElementById('npc-desc').value.trim() || "It looks at you.",
+                friendliness: parseInt(document.getElementById('npc-friend').value) || 25,
+                isHidden: document.getElementById('npc-hidden').checked,
+                minXp: parseInt(document.getElementById('npc-min-xp').value) || 0, maxXp: parseInt(document.getElementById('npc-max-xp').value) || 0,
+                maxHp: parseInt(document.getElementById('npc-hp').value) || 20, hp: parseInt(document.getElementById('npc-hp').value) || 20,
+                minDmg: parseInt(document.getElementById('npc-min-dmg').value) || 1, maxDmg: parseInt(document.getElementById('npc-max-dmg').value) || 5,
+                atkMsgs: document.getElementById('npc-atk-msgs').value.split('|').map(s=>s.trim()), deathMsgs: document.getElementById('npc-death-msgs').value.split('|').map(s=>s.trim()),
+                dialogue: tempDialogueTree ? JSON.parse(JSON.stringify(tempDialogueTree)) : null 
+            };
+            if (editingNpcIdx !== null) { newNpc.items = rooms[selectedRoomId].npcs[editingNpcIdx].items || []; rooms[selectedRoomId].npcs[editingNpcIdx] = newNpc; } 
+            else { newNpc.items = []; rooms[selectedRoomId].npcs.push(newNpc); }
+            cancelNPCEdit(); updateEditorUI();
+        }
+        function deleteNPC(index) { if (!selectedRoomId) return; rooms[selectedRoomId].npcs.splice(index, 1); cancelNPCEdit(); updateEditorUI(); }
+
+        function editItem(isNpc, npcIdx, itemIdx) {
+            if (!selectedRoomId) return; editingItemInfo = { isNpc: isNpc, npcIdx: npcIdx, itemIdx: itemIdx };
+            let item = isNpc ? rooms[selectedRoomId].npcs[npcIdx].items[itemIdx] : rooms[selectedRoomId].items[itemIdx];
+            document.getElementById('item-name').value = item.name; document.getElementById('item-desc').value = item.description;
+            document.getElementById('item-type').value = item.type; document.getElementById('item-duration').value = item.duration;
+            document.getElementById('item-hp').value = item.hpEffect; document.getElementById('item-dmg').value = item.dmgEffect;
+            updateEditorUI(); document.getElementById('btn-add-item').innerText = 'Update Item'; document.getElementById('btn-cancel-item').classList.remove('hidden');
+        }
+
+        function cancelItemEdit() {
+            editingItemInfo = null; document.getElementById('item-name').value = ''; document.getElementById('item-desc').value = ''; 
+            document.getElementById('item-type').value = 'equipment'; document.getElementById('item-duration').value = '0';
+            document.getElementById('item-hp').value = '0'; document.getElementById('item-dmg').value = '0';
+            document.getElementById('btn-add-item').innerText = 'Add Item'; document.getElementById('btn-cancel-item').classList.add('hidden');
+            updateEditorUI();
+        }
+
+        function saveItem() {
+            if (!selectedRoomId) return; const name = document.getElementById('item-name').value.trim(); if (!name) return;
+            const newItem = {
+                name: name, description: document.getElementById('item-desc').value.trim() || "A mysterious object.",
+                type: document.getElementById('item-type').value, duration: parseInt(document.getElementById('item-duration').value) || 0,
+                hpEffect: parseInt(document.getElementById('item-hp').value) || 0, dmgEffect: parseInt(document.getElementById('item-dmg').value) || 0
+            };
+            if (editingItemInfo !== null) { if (editingItemInfo.isNpc) rooms[selectedRoomId].npcs[editingItemInfo.npcIdx].items.splice(editingItemInfo.itemIdx, 1); else rooms[selectedRoomId].items.splice(editingItemInfo.itemIdx, 1); }
+            const placement = placementSelect.value;
+            if (placement === 'floor') { rooms[selectedRoomId].items.push(newItem); } 
+            else { const npcIdx = parseInt(placement); if(!rooms[selectedRoomId].npcs[npcIdx].items) rooms[selectedRoomId].npcs[npcIdx].items = []; rooms[selectedRoomId].npcs[npcIdx].items.push(newItem); }
+            cancelItemEdit();
+        }
+        function deleteItem(index) { if (!selectedRoomId) return; rooms[selectedRoomId].items.splice(index, 1); cancelItemEdit(); updateEditorUI(); }
+        function deleteNPCItem(npcIndex, itemIndex) { if (!selectedRoomId) return; rooms[selectedRoomId].npcs[npcIndex].items.splice(itemIndex, 1); cancelItemEdit(); updateEditorUI(); }
+
+        function deleteRoom() {
+            if (selectedRoomId && confirm("Delete room?")) {
+                delete rooms[selectedRoomId]; if (victoryConditions.targetRoomId == selectedRoomId) victoryConditions.targetRoomId = 'none';
+                for (const id in rooms) { for (const dir in rooms[id].exits) { if (rooms[id].exits[dir] == selectedRoomId) delete rooms[id].exits[dir]; } }
+                selectedRoomId = null; cancelNPCEdit(); cancelItemEdit(); updateEditorUI(); drawMap();
+            }
+        }
+
+        // --- PLAYER & PARSER LOGIC ---
+        function logGame(text, color="#cdd6f4") {
+            const p = document.createElement('div'); p.style.color = color; p.style.marginBottom = "10px"; p.innerHTML = text;
+            gameOutput.appendChild(p); gameOutput.scrollTop = gameOutput.scrollHeight;
+        }
+
+        function updateHUD() {
+            uiLvl.innerText = `Lvl: ${playerStats.level} (${playerStats.xp}/${playerStats.xpNeeded} XP)`;
+            uiHp.innerText = `HP: ${playerStats.hp}/${playerStats.maxHp}`;
+            uiHp.style.color = playerStats.hp <= 0 ? "#f38ba8" : "#f9e2af";
+            uiDmg.innerText = `Dmg: ${playerStats.minDmg}-${playerStats.maxDmg}`;
+        }
+
+        function playRoomMusic(url) {
+            if (currentMusicUrl === url) {
+                if (bgMusic.paused && url) { let p = bgMusic.play(); if (p !== undefined) p.catch(e=>{}); }
+                return; 
+            }
+            currentMusicUrl = url;
+            if (!url) { bgMusic.pause(); bgMusic.removeAttribute('src'); bgMusic.load(); return; }
+            let cleanUrl = url.replace(/["']/g, ""); bgMusic.src = cleanUrl;
+            let playPromise = bgMusic.play();
+            if (playPromise !== undefined) { playPromise.catch(e => { if (e.name !== 'AbortError') { logGame(`<em>System: Cannot play music. Check file path. (${e.message})</em>`, "#f38ba8"); } }); }
+        }
+
+        function getEffectiveDisposition(npc, baseCharisma = null) {
+            let cha = baseCharisma !== null ? baseCharisma : playerStats.charisma;
+            let eff = (npc.friendliness !== undefined ? npc.friendliness : 25) + cha;
+            if (eff <= 50) return 'Hostile'; if (eff <= 70) return 'Neutral'; return 'Friendly';
+        }
+
+        function checkStealthOnEntry() {
+            const room = playRooms[playCurrentRoomId]; let hostiles = room.npcs ? room.npcs.filter(n => getEffectiveDisposition(n) === 'Hostile' && !n.isHidden) : [];
+            if (hostiles.length > 0) {
+                let spotted = false;
+                for (let npc of hostiles) {
+                    let threshold = getRandomInt(20, 50) - (npc.friendliness !== undefined ? npc.friendliness : 25);
+                    if ((playerStats.stealth || 0) <= threshold) { spotted = true; break; }
+                }
+                if (!spotted) { isHidden = true; logGame("<em>You slip into the shadows, unnoticed by the enemies.</em>", "#a6adc8"); } 
+                else { isHidden = false; logGame("<strong>You have been spotted!</strong>", "#f38ba8"); enemiesAttack(); }
+            } else { isHidden = false; }
+        }
+
+        function breakStealth(skipAttack = false) {
+            if (!isHidden) return;
+            isHidden = false; logGame("Your actions revealed you from the shadows!", "#bac2de");
+            const room = playRooms[playCurrentRoomId];
+            if (!skipAttack && room.npcs && room.npcs.some(n => getEffectiveDisposition(n) === 'Hostile' && !n.isHidden)) { 
+                logGame("The enemies attack!", "#f38ba8"); enemiesAttack(); 
+            }
+        }
+
+        function saveCheckpoint() {
+            checkpointState = JSON.stringify({ stats: playerStats, inv: playerInventory, fx: activeEffects, rooms: playRooms, roomId: playCurrentRoomId });
+            logGame("<em>Checkpoint reached. Game saved.</em>", "#a6e3a1");
+        }
+
+        function loadCheckpoint() {
+            if (!checkpointState) { startTest(); return; }
+            let state = JSON.parse(checkpointState);
+            playerStats = state.stats; playerInventory = state.inv; activeEffects = state.fx; playRooms = state.rooms; playCurrentRoomId = state.roomId;
+            gameWon = false; activeDialogue = null; isHidden = false; isLevelingUp = false;
+            gameOutput.innerHTML = ''; playerStatusUI.classList.remove('hidden'); updateHUD();
+            logGame("<strong>--- CHECKPOINT LOADED ---</strong>", "#a6e3a1");
+            playRoomMusic(playRooms[playCurrentRoomId].music || "");
+            look(); checkStealthOnEntry(); drawMap(); cmdInput.focus();
+        }
+
+        function triggerStartTest() { updateAliases(); updateVictory(); updatePlayerStats(); startTest(); }
+
+        function startTest() {
+            playerStats.hp = playerStats.maxHp; 
+            playerStats.level = 1; playerStats.xp = 0; playerStats.xpNeeded = 10;
+            playerInventory = []; activeEffects = []; gameWon = false; activeDialogue = null; isHidden = false; isLevelingUp = false;
+            checkpointState = null; 
+            
+            playRooms = JSON.parse(JSON.stringify(rooms));
+            gameOutput.innerHTML = '';
+            const roomIds = Object.keys(playRooms);
+            if (roomIds.length === 0) { logGame("No rooms exist!", "#f38ba8"); return; }
+            
+            playerStatusUI.classList.remove('hidden'); updateHUD();
+            playCurrentRoomId = roomIds[0]; 
+            logGame("<strong>--- SYSTEM ONLINE ---</strong>", "#a6e3a1");
+            logGame("<em>Play testing started. Type an action to begin.</em>", "#bac2de");
+            playRoomMusic(playRooms[playCurrentRoomId].music || "");
+            
+            if (playRooms[playCurrentRoomId].isCheckpoint) saveCheckpoint();
+            
+            look(); checkStealthOnEntry(); drawMap(); cmdInput.focus();
+        }
+
+        function checkLevelUp() {
+            if (playerStats.xp >= playerStats.xpNeeded) {
+                isLevelingUp = true;
+                playerStats.xp -= playerStats.xpNeeded;
+                playerStats.level += 1;
+                playerStats.xpNeeded = Math.floor(playerStats.xpNeeded * 1.1);
+                
+                logGame(`<br><strong>*** LEVEL UP! You are now Level ${playerStats.level}! ***</strong>`, "#f9e2af");
+                logGame("Choose a stat to increase:", "#cdd6f4");
+                logGame("[1] Max HP (+10)", "#a6e3a1");
+                logGame("[2] Base Damage (+1)", "#a6e3a1");
+                logGame("[3] Wisdom (+1)", "#a6e3a1");
+                logGame("[4] Stealth (+1)", "#a6e3a1");
+                logGame("[5] Charisma (+1)", "#a6e3a1");
+                logGame("<em>(Type a number 1-5 to choose)</em>", "#bac2de");
+                updateHUD();
+            }
+        }
+
+        function checkVictory() {
+            if (gameWon || playerStats.hp <= 0) return;
+            if (victoryConditions.targetRoomId !== 'none' && playCurrentRoomId != victoryConditions.targetRoomId) return;
+            for (let reqItem of victoryConditions.requiredItems) { if (!playerInventory.some(i => i.name.toLowerCase() === reqItem.toLowerCase())) return; }
+            for (let reqNpc of victoryConditions.deadNPCs) {
+                let foundAlive = false;
+                for (let rId in playRooms) { if (playRooms[rId].npcs && playRooms[rId].npcs.some(n => n.name.toLowerCase() === reqNpc.toLowerCase())) { foundAlive = true; break; } }
+                if (foundAlive) return;
+            }
+            gameWon = true; logGame(`<br><strong>*** VICTORY ***</strong>`, "#a6e3a1"); logGame(`<strong>${victoryConditions.victoryMessage}</strong>`, "#f9e2af"); logGame("<em>Type 'restart' to play again.</em>", "#bac2de");
+        }
+
+        function look() {
+            const room = playRooms[playCurrentRoomId]; 
+            let imgHTML = room.image ? `<img src="${room.image.replace(/["']/g, "")}" class="room-image"><br>` : "";
+            logGame(`<strong>[ ${room.name} ]</strong><br>${imgHTML}${room.description}`);
+            if (room.npcs && room.npcs.length > 0) {
+                let npcLog = "<div style='margin-top: 5px;'>";
+                room.npcs.forEach(npc => {
+                    if (npc.isHidden) return; // Hide invisible NPCs
+                    let disp = getEffectiveDisposition(npc); let dispColor = disp === 'Hostile' ? '#f38ba8' : (disp === 'Friendly' ? '#a6e3a1' : '#bac2de');
+                    npcLog += `> <span style="color:${dispColor}">[${disp}]</span> <strong>${npc.name}</strong> is here. (HP: ${npc.hp}/${npc.maxHp})<br>`;
+                });
+                if (npcLog !== "<div style='margin-top: 5px;'>") { npcLog += "</div>"; logGame(npcLog); }
+            }
+            if (room.items && room.items.length > 0) {
+                let itemLog = "<div style='margin-top: 5px; color:#f9e2af;'>"; room.items.forEach(item => { itemLog += `> There is a <strong>${item.name}</strong> here.<br>`; }); itemLog += "</div>"; logGame(itemLog);
+            }
+            let exitsArray = [];
+            for (const dir in room.exits) { if(room.locks && room.locks[dir]) exitsArray.push(`${dir} <span style="color:#f38ba8">(Locked)</span>`); else exitsArray.push(dir); }
+            logGame(`<em>Exits: ${exitsArray.length > 0 ? exitsArray.join(", ") : "None"}</em>`, "#a6adc8");
+        }
+
+        function advanceTurn() {
+            for (let i = activeEffects.length - 1; i >= 0; i--) {
+                activeEffects[i].duration--;
+                if (activeEffects[i].duration <= 0) {
+                    let eff = activeEffects.splice(i, 1)[0]; playerStats.minDmg -= eff.dmgEffect; playerStats.maxDmg -= eff.dmgEffect;
+                    if (eff.hpEffect > 0) { playerStats.hp -= eff.hpEffect; if (playerStats.hp <= 0) playerStats.hp = 1; }
+                    logGame(`The effects of ${eff.name} have worn off.`, "#f9e2af"); updateHUD();
+                }
+            }
+        }
+
+        function checkInventory() {
+            if (playerInventory.length === 0) { logGame("Your inventory is empty.", "#bac2de"); return; }
+            let invStr = "<strong>Inventory:</strong><br>"; playerInventory.forEach(i => invStr += `> <strong>${i.name}</strong> - ${i.description}<br>`); logGame(invStr, "#f9e2af");
+        }
+
+        function takeItem(itemName) {
+            if (!itemName) { logGame("Take what?", "#f38ba8"); return false; } const room = playRooms[playCurrentRoomId];
+            if (!room.items || room.items.length === 0) { logGame("There's nothing here to take.", "#f38ba8"); return false; }
+            const idx = room.items.findIndex(i => i.name.toLowerCase() === itemName); if (idx === -1) { logGame(`You don't see a ${itemName} here.`, "#f38ba8"); return false; }
+            const item = room.items.splice(idx, 1)[0]; playerInventory.push(item); let msg = `You picked up the ${item.name}.`;
+            if (item.type === 'equipment') { playerStats.maxHp += item.hpEffect; playerStats.hp += item.hpEffect; playerStats.minDmg += item.dmgEffect; playerStats.maxDmg += item.dmgEffect; msg += " (Passive stats applied)"; }
+            logGame(msg, "#a6e3a1"); updateHUD(); return true;
+        }
+
+        function dropItem(itemName) {
+            if (!itemName) { logGame("Drop what?", "#f38ba8"); return false; } const idx = playerInventory.findIndex(i => i.name.toLowerCase() === itemName);
+            if (idx === -1) { logGame(`You don't have a ${itemName}.`, "#f38ba8"); return false; }
+            const item = playerInventory.splice(idx, 1)[0]; const room = playRooms[playCurrentRoomId]; if(!room.items) room.items = []; room.items.push(item);
+            let msg = `You dropped the ${item.name}.`;
+            if (item.type === 'equipment') { playerStats.maxHp -= item.hpEffect; playerStats.hp -= item.hpEffect; playerStats.minDmg -= item.dmgEffect; playerStats.maxDmg -= item.dmgEffect; if (playerStats.hp <= 0) playerStats.hp = 1; msg += " (Passive stats removed)"; }
+            logGame(msg, "#bac2de"); updateHUD(); return true;
+        }
+
+        function useItem(itemName) {
+            if (!itemName) { logGame("Use what?", "#f38ba8"); return false; } const idx = playerInventory.findIndex(i => i.name.toLowerCase() === itemName);
+            if (idx === -1) { logGame(`You don't have a ${itemName} to use.`, "#f38ba8"); return false; }
+            if (playerInventory[idx].type === 'equipment') { logGame("You don't need to use that. Its stats apply automatically while in your inventory.", "#bac2de"); return false; }
+            const item = playerInventory.splice(idx, 1)[0]; 
+            playerStats.hp += item.hpEffect; if(playerStats.hp > playerStats.maxHp) playerStats.hp = playerStats.maxHp;
+            playerStats.minDmg += item.dmgEffect; playerStats.maxDmg += item.dmgEffect;
+            let msg = `You used the ${item.name}.`;
+            if (item.hpEffect > 0) msg += ` Restored ${item.hpEffect} HP.`; if (item.hpEffect < 0) msg += ` Lost ${Math.abs(item.hpEffect)} HP.`; if (item.dmgEffect > 0) msg += ` Damage increased by ${item.dmgEffect}!`;
+            if (item.duration > 0) { let totalDuration = item.duration + (playerStats.wisdom || 0); activeEffects.push({ name: item.name, hpEffect: item.hpEffect, dmgEffect: item.dmgEffect, duration: totalDuration }); msg += ` (Lasts ${totalDuration} turns)`; }
+            logGame(msg, "#a6e3a1"); updateHUD(); 
+            if(playerStats.hp <= 0) { 
+                logGame("<strong>The item killed you.</strong>", "#f38ba8"); 
+                logGame(checkpointState ? "<em>GAME OVER. Type 'restart' to load checkpoint, or 'reset' to start over.</em>" : "<em>GAME OVER. Type 'restart' to try again.</em>", "#f38ba8");
+            }
+            return true;
+        }
+
+        function giveItem(payload) {
+            if (!payload || !payload.includes(" to ")) { logGame("Give what to who? (e.g., 'give [item] to [target]')", "#f38ba8"); return false; }
+            let parts = payload.split(" to "); let itemName = parts[0].trim(); let npcName = parts[1].trim();
+            const invIdx = playerInventory.findIndex(i => i.name.toLowerCase() === itemName); if (invIdx === -1) { logGame(`You don't have a ${itemName}.`, "#f38ba8"); return false; }
+            const room = playRooms[playCurrentRoomId]; if (!room.npcs || room.npcs.length === 0) { logGame("There's no one here to give that to.", "#f38ba8"); return false; }
+            const npcIdx = room.npcs.findIndex(n => n.name.toLowerCase() === npcName && !n.isHidden); if (npcIdx === -1) { logGame(`You don't see a ${npcName} here.`, "#f38ba8"); return false; }
+            let item = playerInventory.splice(invIdx, 1)[0]; if(!room.npcs[npcIdx].items) room.npcs[npcIdx].items = []; room.npcs[npcIdx].items.push(item);
+            logGame(`You gave the ${item.name} to ${room.npcs[npcIdx].name}.`, "#a6e3a1");
+            if (item.type === 'equipment') { playerStats.maxHp -= item.hpEffect; playerStats.hp -= item.hpEffect; playerStats.minDmg -= item.dmgEffect; playerStats.maxDmg -= item.dmgEffect; if (playerStats.hp <= 0) playerStats.hp = 1; }
+            updateHUD(); return true;
+        }
+
+        function talkToNPC(targetName) {
+            const room = playRooms[playCurrentRoomId]; if(!room.npcs || room.npcs.length === 0) { logGame("There is no one here to talk to.", "#f38ba8"); return false; }
+            let targetIndex = -1;
+            if (!targetName) { 
+                let visibleNpcs = room.npcs.filter(n => !n.isHidden);
+                if (visibleNpcs.length === 1) targetIndex = room.npcs.indexOf(visibleNpcs[0]); 
+                else { logGame("Talk to who?", "#f38ba8"); return false; } 
+            } 
+            else { targetIndex = room.npcs.findIndex(n => n.name.toLowerCase() === targetName.toLowerCase() && !n.isHidden); if(targetIndex === -1) { logGame(`You don't see ${targetName} here.`, "#f38ba8"); return false; } }
+            let npc = room.npcs[targetIndex];
+            if (getEffectiveDisposition(npc) === 'Hostile') { logGame(`${npc.name} doesn't want to talk, they want to kill you!`, "#f38ba8"); return false; }
+            if (!npc.dialogue || !npc.dialogue.npcText) { logGame(`${npc.name} has nothing to say to you.`, "#bac2de"); return false; }
+            activeDialogue = { npc: npc, node: npc.dialogue }; printDialogueNode(); return false;
+        }
+
+        function printDialogueNode() {
+            logGame(`<strong>[${activeDialogue.npc.name}]</strong> "${activeDialogue.node.npcText}"`, "#89b4fa");
+            if (!activeDialogue.node.choices || activeDialogue.node.choices.length === 0) { logGame("<em>(Conversation ends)</em>", "#bac2de"); activeDialogue = null; } 
+            else { activeDialogue.node.choices.forEach((c, i) => { logGame(`  [${i + 1}] ${c.playerText}`, "#a6e3a1"); }); logGame("<em>(Type a number to reply, or 'leave')</em>", "#bac2de"); }
+        }
+
+        function getRandomInt(min, max) { return Math.floor(Math.random() * (max - min + 1)) + min; }
+        function getRandomMsg(arr, defaultMsg) { return (!arr || arr.length === 0 || arr[0] === "") ? defaultMsg : arr[Math.floor(Math.random() * arr.length)]; }
+
+        function handleCombat(targetName) {
+            const room = playRooms[playCurrentRoomId]; if(!room.npcs || room.npcs.length === 0) { logGame("There is no one here to attack.", "#f38ba8"); return false; }
+            let targetIndex = -1;
+            if (!targetName) { 
+                let visibleNpcs = room.npcs.filter(n => !n.isHidden);
+                if (visibleNpcs.length === 1) targetIndex = room.npcs.indexOf(visibleNpcs[0]); 
+                else { logGame("Who do you want to attack?", "#f38ba8"); return false; } 
+            } 
+            else { targetIndex = room.npcs.findIndex(n => n.name.toLowerCase() === targetName.toLowerCase() && !n.isHidden); if(targetIndex === -1) { logGame(`You don't see a ${targetName} here.`, "#f38ba8"); return false; } }
+            let npc = room.npcs[targetIndex];
+            let currentDisp = getEffectiveDisposition(npc);
+            if (currentDisp === 'Neutral') { logGame(`You attacked a neutral entity! ${npc.name} turns hostile!`, "#f38ba8"); npc.friendliness = 0; } 
+            else if (currentDisp === 'Friendly') { logGame(`You attack ${npc.name}, but they refuse to fight back.`, "#bac2de"); }
+
+            let dmg = getRandomInt(playerStats.minDmg, playerStats.maxDmg); npc.hp -= dmg;
+            let atkMsg = getRandomMsg(playerStats.atkMsgs, "You hit the {target}!").replace(/{target}/g, npc.name); logGame(`${atkMsg} (Dealt ${dmg} damage)`, "#a6e3a1");
+            
+            if(npc.hp <= 0) {
+                let xpGain = getRandomInt(npc.minXp !== undefined ? npc.minXp : 2, npc.maxXp !== undefined ? npc.maxXp : 5); playerStats.xp += xpGain;
+                let deathMsg = getRandomMsg(npc.deathMsgs, "The {npc} dies.").replace(/{npc}/g, npc.name); logGame(deathMsg + ` (Gained ${xpGain} XP)`, "#f9e2af"); 
+                if (npc.items && npc.items.length > 0) { if (!room.items) room.items = []; npc.items.forEach(it => { room.items.push(it); logGame(`The ${npc.name} dropped a ${it.name}.`, "#f9e2af"); }); }
+                room.npcs.splice(targetIndex, 1); 
+            }
+            enemiesAttack(); 
+            if(playerStats.hp > 0) checkLevelUp();
+            return true;
+        }
+
+        function enemiesAttack() {
+            if(playerStats.hp <= 0) return; const room = playRooms[playCurrentRoomId]; if(!room.npcs) return;
+            room.npcs.forEach(npc => {
+                if(getEffectiveDisposition(npc) === 'Hostile' && npc.hp > 0 && !npc.isHidden) {
+                    let dmg = getRandomInt(npc.minDmg, npc.maxDmg); playerStats.hp -= dmg;
+                    let atkMsg = getRandomMsg(npc.atkMsgs, "The {npc} attacks you!").replace(/{npc}/g, npc.name); logGame(`${atkMsg} (Took ${dmg} damage)`, "#f38ba8");
+                }
+            });
+            updateHUD(); 
+            if(playerStats.hp <= 0) { 
+                logGame(`<strong>${getRandomMsg(playerStats.deathMsgs, "You have died.")}</strong>`, "#f38ba8"); 
+                logGame(checkpointState ? "<em>GAME OVER. Type 'restart' to load checkpoint, or 'reset' to start over.</em>" : "<em>GAME OVER. Type 'restart' to try again.</em>", "#f38ba8");
+            }
+        }
+
+        function getActionPayload(cmd, aliasesArray) {
+            if (!aliasesArray) return null;
+            for (let alias of aliasesArray) { if (cmd === alias) return ""; if (cmd.startsWith(alias + " ")) return cmd.substring(alias.length).trim(); }
+            return null;
+        }
+
+        function parseCommand() {
+            if (currentMusicUrl && bgMusic.paused) { let p = bgMusic.play(); if (p !== undefined) p.catch(e=>{}); }
+            const rawCmd = cmdInput.value.trim(); if (!rawCmd) return; cmdInput.value = ''; const cmd = rawCmd.toLowerCase(); logGame(`> <strong>${rawCmd}</strong>`, "#cdd6f4");
+
+            if (cmd === 'reset') { startTest(); return; }
+            if (cmd === 'restart') { checkpointState ? loadCheckpoint() : startTest(); return; }
+
+            if(playerStats.hp <= 0) { logGame(checkpointState ? "You are dead. Type 'restart' for checkpoint, or 'reset' to start over." : "You are dead. Type 'restart' to try again.", "#f38ba8"); return; }
+            if(gameWon) { logGame("You have already won. Type 'restart' to play again.", "#a6e3a1"); return; }
+
+            if (isLevelingUp) {
+                let choice = parseInt(cmd);
+                if (choice === 1) { playerStats.maxHp += 10; playerStats.hp += 10; logGame("Max HP increased by 10!", "#a6e3a1"); }
+                else if (choice === 2) { playerStats.minDmg += 1; playerStats.maxDmg += 1; logGame("Base Damage increased by 1!", "#a6e3a1"); }
+                else if (choice === 3) { playerStats.wisdom += 1; logGame("Wisdom increased by 1!", "#a6e3a1"); }
+                else if (choice === 4) { playerStats.stealth += 1; logGame("Stealth increased by 1!", "#a6e3a1"); }
+                else if (choice === 5) { playerStats.charisma += 1; logGame("Charisma increased by 1!", "#a6e3a1"); }
+                else { logGame("Please type a number from 1 to 5.", "#f38ba8"); return; }
+                
+                isLevelingUp = false; updateHUD();
+                if (playerStats.xp >= playerStats.xpNeeded) checkLevelUp(); else look();
+                cmdInput.focus(); return;
+            }
+
+            if (activeDialogue) {
+                if (isHidden) breakStealth();
+                if (cmd === 'leave' || cmd === 'exit' || cmd === 'bye') { logGame("You end the conversation.", "#bac2de"); activeDialogue = null; look(); return; }
+                let choiceNum = parseInt(cmd);
+                if (!isNaN(choiceNum) && choiceNum > 0 && choiceNum <= activeDialogue.node.choices.length) {
+                    let choice = activeDialogue.node.choices[choiceNum - 1]; logGame(`> You say: "${choice.playerText}"`, "#a6e3a1");
+                    
+                    if (choice.giveItems) {
+                        let itemsToGive = choice.giveItems.split(',').map(s => s.trim().toLowerCase()).filter(s => s);
+                        itemsToGive.forEach(itemName => {
+                            if (activeDialogue.npc.items) {
+                                let npcItemIdx = activeDialogue.npc.items.findIndex(i => i.name.toLowerCase() === itemName);
+                                if (npcItemIdx !== -1) {
+                                    let givenItem = activeDialogue.npc.items.splice(npcItemIdx, 1)[0];
+                                    playerInventory.push(givenItem);
+                                    let giveMsg = `> ${activeDialogue.npc.name} gives you the ${givenItem.name}.`;
+                                    if (givenItem.type === 'equipment') {
+                                        playerStats.maxHp += givenItem.hpEffect; playerStats.hp += givenItem.hpEffect;
+                                        playerStats.minDmg += givenItem.dmgEffect; playerStats.maxDmg += givenItem.dmgEffect;
+                                        giveMsg += " (Passive stats applied)";
+                                    }
+                                    logGame(giveMsg, "#f9e2af");
+                                }
+                            }
+                        });
+                        updateHUD();
+                    }
+
+                    if (choice.npcAction && choice.npcAction !== 'none') {
+                        let r = playRooms[playCurrentRoomId]; let nIdx = r.npcs.findIndex(n => n === activeDialogue.npc);
+                        if (choice.npcAction === 'vanish') { logGame(`> ${activeDialogue.npc.name} vanishes!`, "#bac2de"); if (nIdx !== -1) r.npcs.splice(nIdx, 1); activeDialogue = null; look(); return; } 
+                        else if (choice.npcAction === 'move') {
+                            let tRoom = choice.actionTarget.trim();
+                            if (playRooms[tRoom]) {
+                                logGame(`> ${activeDialogue.npc.name} leaves.`, "#bac2de");
+                                if (nIdx !== -1) { let movingNpc = r.npcs.splice(nIdx, 1)[0]; if (!playRooms[tRoom].npcs) playRooms[tRoom].npcs = []; playRooms[tRoom].npcs.push(movingNpc); }
+                            } else { logGame(`> ${activeDialogue.npc.name} tries to leave, but the destination doesn't exist!`, "#bac2de"); }
+                            activeDialogue = null; look(); return;
+                        } 
+                        else if (choice.npcAction === 'attack') { logGame(`> ${activeDialogue.npc.name} suddenly attacks!`, "#f38ba8"); activeDialogue.npc.friendliness = 0; activeDialogue = null; enemiesAttack(); return; } 
+                        else if (choice.npcAction === 'steal') {
+                            let itemName = choice.actionTarget.trim().toLowerCase(); let pIdx = playerInventory.findIndex(i => i.name.toLowerCase() === itemName);
+                            if (pIdx !== -1) {
+                                let stolen = playerInventory.splice(pIdx, 1)[0]; if (!activeDialogue.npc.items) activeDialogue.npc.items = []; activeDialogue.npc.items.push(stolen);
+                                logGame(`> ${activeDialogue.npc.name} steals your ${stolen.name}!`, "#f38ba8");
+                                if (stolen.type === 'equipment') { playerStats.maxHp -= stolen.hpEffect; playerStats.hp -= stolen.hpEffect; playerStats.minDmg -= stolen.dmgEffect; playerStats.maxDmg -= stolen.dmgEffect; if (playerStats.hp <= 0) playerStats.hp = 1; }
+                                updateHUD();
+                            } else { logGame(`> ${activeDialogue.npc.name} tries to steal something, but you don't have it!`, "#bac2de"); }
+                        }
+                    }
+                    if (choice.nextNode) { activeDialogue.node = choice.nextNode; printDialogueNode(); } else { logGame("<em>(Conversation ends)</em>", "#bac2de"); activeDialogue = null; look(); }
+                } else { logGame("Please type a valid number to reply, or type 'leave'.", "#f38ba8"); }
+                return; 
+            }
+
+            // --- NEW: CUSTOM ROOM EVENT INTERCEPT ---
+            let currentRoom = playRooms[playCurrentRoomId];
+            if (currentRoom.eventCmd) {
+                let triggers = currentRoom.eventCmd.split(',').map(s => s.trim().toLowerCase()).filter(s => s);
+                if (triggers.includes(cmd)) {
+                    let eventTriggered = true;
+                    if (currentRoom.eventMsg) logGame(`<em>${currentRoom.eventMsg}</em>`, "#cba6f7");
+                    
+                    let revealedHostile = false;
+                    if (currentRoom.eventReveal && currentRoom.npcs) {
+                        currentRoom.npcs.forEach(n => {
+                            if (n.isHidden) {
+                                n.isHidden = false;
+                                logGame(`> ${n.name} is revealed!`, "#f9e2af");
+                                if (getEffectiveDisposition(n) === 'Hostile') revealedHostile = true;
+                            }
+                        });
+                    }
+                    
+                    if (revealedHostile) { breakStealth(true); enemiesAttack(); }
+
+                    if (currentRoom.eventMove && playRooms[currentRoom.eventMove]) {
+                        playCurrentRoomId = currentRoom.eventMove;
+                        playRoomMusic(playRooms[playCurrentRoomId].music || "");
+                        if (playRooms[playCurrentRoomId].isCheckpoint) saveCheckpoint();
+                        look(); checkStealthOnEntry(); drawMap();
+                    } else if (!revealedHostile) {
+                        // If we didn't move and didn't get attacked, just update the HUD
+                        advanceTurn();
+                    }
+                    
+                    cmdInput.focus();
+                    return; // Stop parsing regular commands
+                }
+            }
+
+            let matchedDirection = null; 
+            for (let dir of ['North', 'South', 'East', 'West']) { if (aliases[dir] && aliases[dir].includes(cmd)) { matchedDirection = dir; break; } }
+            let tookAction = false; let payload; let isNoisy = false;
+
+            if (matchedDirection) tookAction = move(matchedDirection);
+            else if ((payload = getActionPayload(cmd, aliases.look)) !== null) look();
+            else if ((payload = getActionPayload(cmd, aliases.inv)) !== null) checkInventory();
+            else if ((payload = getActionPayload(cmd, aliases.take)) !== null) { tookAction = takeItem(payload); isNoisy = true; }
+            else if ((payload = getActionPayload(cmd, aliases.drop)) !== null) { tookAction = dropItem(payload); isNoisy = true; }
+            else if ((payload = getActionPayload(cmd, aliases.use)) !== null) { tookAction = useItem(payload); isNoisy = true; }
+            else if ((payload = getActionPayload(cmd, aliases.attack)) !== null) { if (isHidden) breakStealth(true); tookAction = handleCombat(payload); isNoisy = false; }
+            else if ((payload = getActionPayload(cmd, aliases.give)) !== null) { tookAction = giveItem(payload); isNoisy = true; }
+            else if ((payload = getActionPayload(cmd, aliases.talk)) !== null) { tookAction = talkToNPC(payload); isNoisy = true; }
+            else logGame("I don't understand that command.", "#f38ba8");
+            
+            if(tookAction) { if (isNoisy) breakStealth(); advanceTurn(); checkVictory(); }
+            cmdInput.focus();
+        }
+
+        function move(direction) {
+            const room = playRooms[playCurrentRoomId]; let hostiles = room.npcs ? room.npcs.filter(n => getEffectiveDisposition(n) === 'Hostile' && !n.isHidden) : [];
+            if(hostiles.length > 0 && !isHidden) { logGame("You can't flee while enemies are present!", "#f38ba8"); enemiesAttack(); return true; }
+            if (room.exits[direction]) { 
+                if (room.locks && room.locks[direction]) {
+                    const reqKey = room.locks[direction].toLowerCase(); const hasKey = playerInventory.some(i => i.name.toLowerCase() === reqKey);
+                    if (hasKey) { logGame(`You unlock the door using the ${room.locks[direction]}.`, "#a6e3a1"); delete room.locks[direction]; } 
+                    else { logGame(`The way is locked. You need: ${room.locks[direction]}.`, "#f38ba8"); return false; }
+                }
+                playCurrentRoomId = room.exits[direction]; 
+                playRoomMusic(playRooms[playCurrentRoomId].music || "");
+                if (playRooms[playCurrentRoomId].isCheckpoint) saveCheckpoint(); // SAVE ON ENTRY
+                look(); checkStealthOnEntry(); drawMap(); return true; 
+            } else { logGame("You can't go that way.", "#f38ba8"); return false; }
+        }
+
+        function triggerExport() { updateAliases(); updateVictory(); updatePlayerStats(); exportGame(); }
+
+        async function exportGame() {
+            const roomIds = Object.keys(rooms);
+            if (roomIds.length === 0) { alert("Build a room first!"); return; }
+
+            const rawName = document.getElementById('game-name-input').value.trim() || "My Game";
+            const safeName = rawName.replace(/[^a-z0-9_-]/gi, '_'); // Makes string safe for file naming
+            const gameMetaString = JSON.stringify({ name: rawName, version: gameVersion });
+
+            const gameDataString = JSON.stringify(rooms); const aliasesString = JSON.stringify(aliases);
+            const playerStatsString = JSON.stringify(playerStats); const victoryConditionsString = JSON.stringify(victoryConditions);
+
+            const standaloneHTML = `<!DOCTYPE html>
+<html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>${rawName}</title>
+<style>
+    body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; margin: 0; background-color: #1e1e2e; color: #cdd6f4; display: flex; justify-content: center; align-items: center; height: 100vh; }
+    #player-panel { width: 100%; max-width: 700px; height: 85vh; background-color: #181825; border: 2px solid #313244; display: flex; flex-direction: column; padding: 20px; box-sizing: border-box; border-radius: 8px; box-shadow: 0 10px 30px rgba(0,0,0,0.5); }
+    #player-status { display: flex; justify-content: space-between; background: #313244; padding: 15px; border-radius: 4px; margin-bottom: 10px; font-weight: bold; color: #f9e2af; font-size: 1.2em;}
+    #game-output { flex-grow: 1; background: #11111b; padding: 20px; overflow-y: auto; font-family: 'Courier New', Courier, monospace; margin-bottom: 20px; border-radius: 4px; border: 1px solid #313244; font-size: 1.1em; line-height: 1.4; }
+    #parser-ui { display: flex; gap: 10px; margin-bottom: 20px; }
+    #parser-ui input { flex-grow: 1; padding: 15px; background: #313244; color: #a6e3a1; border: 1px solid #45475a; border-radius: 4px; font-family: 'Courier New', Courier, monospace; font-size: 1.1em; font-weight: bold;}
+    #parser-ui button { background: #a6e3a1; color: #11111b; border: none; padding: 15px 25px; cursor: pointer; border-radius: 4px; font-weight: bold; font-size: 1.1em; transition: background 0.2s; }
+    #parser-ui button:hover { background: #b4befe; }
+    .room-image { max-width: 100%; border-radius: 4px; margin-top: 5px; margin-bottom: 5px; border: 1px solid #45475a; }
+</style></head><body>
+<audio id="bg-music" loop style="display:none;"></audio>
+<div id="player-panel">
+    <h2 style="margin: 0; text-align: center; color: #89b4fa;">${rawName}</h2>
+    <div id="player-status"><span id="ui-lvl" style="color:#cba6f7;">Lvl: 1 (0/10 XP)</span><span id="ui-hp">HP: 100/100</span><span id="ui-dmg">Dmg: 5-15</span></div>
+    <div id="game-output"></div>
+    <div id="parser-ui"><input type="text" id="cmd-input" placeholder="Action..." autocomplete="off" onkeydown="if(event.key === 'Enter') parseCommand()"><button onclick="parseCommand()">Send</button></div>
+</div>
+<script>
+    let playRooms = ${gameDataString}; const aliases = ${aliasesString}; let playerStats = ${playerStatsString}; let victoryConditions = ${victoryConditionsString};
+    let gameMeta = ${gameMetaString};
+    
+    playerStats.level = 1; playerStats.xp = 0; playerStats.xpNeeded = 10;
+    let playerInventory = []; let activeEffects = []; let gameWon = false; let activeDialogue = null; let isHidden = false; let isLevelingUp = false;
+    let checkpointState = null;
+    let playCurrentRoomId = Object.keys(playRooms)[0];
+    const bgMusic = document.getElementById('bg-music'); let currentMusicUrl = "";
+    
+    const gameOutput = document.getElementById('game-output'); const cmdInput = document.getElementById('cmd-input'); 
+    const uiHp = document.getElementById('ui-hp'); const uiDmg = document.getElementById('ui-dmg'); const uiLvl = document.getElementById('ui-lvl');
+
+    function logGame(text, color="#cdd6f4") { const p = document.createElement('div'); p.style.color = color; p.style.marginBottom = "15px"; p.innerHTML = text; gameOutput.appendChild(p); gameOutput.scrollTop = gameOutput.scrollHeight; }
+    function updateHUD() { uiLvl.innerText = 'Lvl: ' + playerStats.level + ' (' + playerStats.xp + '/' + playerStats.xpNeeded + ' XP)'; uiHp.innerText = 'HP: ' + playerStats.hp + '/' + playerStats.maxHp; uiHp.style.color = playerStats.hp <= 0 ? "#f38ba8" : "#f9e2af"; uiDmg.innerText = 'Dmg: ' + playerStats.minDmg + '-' + playerStats.maxDmg; }
+
+    function playRoomMusic(url) {
+        if (currentMusicUrl === url) { if (bgMusic.paused && url) { let p = bgMusic.play(); if (p !== undefined) p.catch(e=>{}); } return; }
+        currentMusicUrl = url;
+        if (!url) { bgMusic.pause(); bgMusic.removeAttribute('src'); bgMusic.load(); return; }
+        let cleanUrl = url.replace(/["']/g, ""); bgMusic.src = cleanUrl;
+        let playPromise = bgMusic.play();
+        if (playPromise !== undefined) { playPromise.catch(e => { if (e.name !== 'AbortError') { logGame('<em>System: Cannot play music. Check file path. (' + e.message + ')</em>', "#f38ba8"); } }); }
+    }
+
+    function getEffectiveDisposition(npc, baseCharisma = null) {
+        let cha = baseCharisma !== null ? baseCharisma : playerStats.charisma; let eff = (npc.friendliness !== undefined ? npc.friendliness : 25) + cha;
+        if (eff <= 50) return 'Hostile'; if (eff <= 70) return 'Neutral'; return 'Friendly';
+    }
+
+    function checkStealthOnEntry() {
+        const room = playRooms[playCurrentRoomId]; let hostiles = room.npcs ? room.npcs.filter(n => getEffectiveDisposition(n) === 'Hostile' && !n.isHidden) : [];
+        if (hostiles.length > 0) {
+            let spotted = false;
+            for (let npc of hostiles) { let threshold = getRandomInt(20, 50) - (npc.friendliness !== undefined ? npc.friendliness : 25); if ((playerStats.stealth || 0) <= threshold) { spotted = true; break; } }
+            if (!spotted) { isHidden = true; logGame("<em>You slip into the shadows, unnoticed by the enemies.</em>", "#a6adc8"); } 
+            else { isHidden = false; logGame("<strong>You have been spotted!</strong>", "#f38ba8"); enemiesAttack(); }
+        } else { isHidden = false; }
+    }
+
+    function breakStealth(skipAttack = false) {
+        if (!isHidden) return;
+        isHidden = false; logGame("Your actions revealed you from the shadows!", "#bac2de");
+        const room = playRooms[playCurrentRoomId]; 
+        if (!skipAttack && room.npcs && room.npcs.some(n => getEffectiveDisposition(n) === 'Hostile' && !n.isHidden)) { logGame("The enemies attack!", "#f38ba8"); enemiesAttack(); }
+    }
+
+    function saveCheckpoint() {
+        checkpointState = JSON.stringify({ stats: playerStats, inv: playerInventory, fx: activeEffects, rooms: playRooms, roomId: playCurrentRoomId });
+        logGame("<em>Checkpoint reached. Game saved.</em>", "#a6e3a1");
+    }
+
+    function loadCheckpoint() {
+        if (!checkpointState) { startTest(); return; }
+        let state = JSON.parse(checkpointState);
+        playerStats = state.stats; playerInventory = state.inv; activeEffects = state.fx; playRooms = state.rooms; playCurrentRoomId = state.roomId;
+        gameWon = false; activeDialogue = null; isHidden = false; isLevelingUp = false;
+        gameOutput.innerHTML = ''; updateHUD();
+        logGame("<strong>--- CHECKPOINT LOADED ---</strong>", "#a6e3a1");
+        playRoomMusic(playRooms[playCurrentRoomId].music || "");
+        look(); checkStealthOnEntry(); cmdInput.focus();
+    }
+
+    function startTest() {
+        playerStats.hp = playerStats.maxHp; 
+        playerStats.level = 1; playerStats.xp = 0; playerStats.xpNeeded = 10;
+        playerInventory = []; activeEffects = []; gameWon = false; activeDialogue = null; isHidden = false; isLevelingUp = false;
+        checkpointState = null; 
+        
+        playRooms = JSON.parse(JSON.stringify(${gameDataString}));
+        gameOutput.innerHTML = '';
+        
+        updateHUD();
+        playCurrentRoomId = Object.keys(playRooms)[0]; 
+        logGame("<strong>--- SYSTEM ONLINE ---</strong>", "#a6e3a1");
+        logGame("<em>Play testing started. Type an action to begin.</em>", "#bac2de");
+        playRoomMusic(playRooms[playCurrentRoomId].music || "");
+        if (playRooms[playCurrentRoomId].isCheckpoint) saveCheckpoint();
+        look(); checkStealthOnEntry(); cmdInput.focus();
+    }
+
+    function checkLevelUp() {
+        if (playerStats.xp >= playerStats.xpNeeded) {
+            isLevelingUp = true; playerStats.xp -= playerStats.xpNeeded; playerStats.level += 1; playerStats.xpNeeded = Math.floor(playerStats.xpNeeded * 1.1);
+            logGame('<br><strong>*** LEVEL UP! You are now Level ' + playerStats.level + '! ***</strong>', "#f9e2af");
+            logGame("Choose a stat to increase:", "#cdd6f4"); logGame("[1] Max HP (+10)", "#a6e3a1"); logGame("[2] Base Damage (+1)", "#a6e3a1");
+            logGame("[3] Wisdom (+1)", "#a6e3a1"); logGame("[4] Stealth (+1)", "#a6e3a1"); logGame("[5] Charisma (+1)", "#a6e3a1");
+            logGame("<em>(Type a number 1-5 to choose)</em>", "#bac2de"); updateHUD();
+        }
+    }
+
+    function checkVictory() {
+        if (gameWon || playerStats.hp <= 0) return;
+        if (victoryConditions.targetRoomId !== 'none' && playCurrentRoomId != victoryConditions.targetRoomId) return;
+        for (let reqItem of victoryConditions.requiredItems) { if (!playerInventory.some(i => i.name.toLowerCase() === reqItem.toLowerCase())) return; }
+        for (let reqNpc of victoryConditions.deadNPCs) {
+            let foundAlive = false;
+            for (let rId in playRooms) { if (playRooms[rId].npcs && playRooms[rId].npcs.some(n => n.name.toLowerCase() === reqNpc.toLowerCase())) { foundAlive = true; break; } }
+            if (foundAlive) return;
+        }
+        gameWon = true; logGame('<br><strong>*** VICTORY ***</strong>', "#a6e3a1"); logGame('<strong>' + victoryConditions.victoryMessage + '</strong>', "#f9e2af"); logGame("<em>Refresh page to play again.</em>", "#bac2de");
+    }
+
+    function look() {
+        const room = playRooms[playCurrentRoomId]; 
+        let imgHTML = room.image ? '<img src="' + room.image.replace(/["']/g, "") + '" class="room-image"><br>' : '';
+        logGame('<strong>[ ' + room.name + ' ]</strong><br>' + imgHTML + room.description);
+        if (room.npcs && room.npcs.length > 0) {
+            let npcLog = "<div style='margin-top: 5px;'>";
+            room.npcs.forEach(npc => { 
+                if (npc.isHidden) return;
+                let disp = getEffectiveDisposition(npc); let dispColor = disp === 'Hostile' ? '#f38ba8' : (disp === 'Friendly' ? '#a6e3a1' : '#bac2de'); 
+                npcLog += '> <span style="color:' + dispColor + '">[' + disp + ']</span> <strong>' + npc.name + '</strong> is here. (HP: ' + npc.hp + '/' + npc.maxHp + ')<br>'; 
+            });
+            if (npcLog !== "<div style='margin-top: 5px;'>") { npcLog += "</div>"; logGame(npcLog); }
+        }
+        if (room.items && room.items.length > 0) {
+            let itemLog = "<div style='margin-top: 5px; color:#f9e2af;'>"; room.items.forEach(item => { itemLog += '> There is a <strong>' + item.name + '</strong> here.<br>'; }); itemLog += "</div>"; logGame(itemLog);
+        }
+        let exitsArray = [];
+        for (const dir in room.exits) { if(room.locks && room.locks[dir]) exitsArray.push(dir + ' <span style="color:#f38ba8">(Locked)</span>'); else exitsArray.push(dir); }
+        logGame('<em>Exits: ' + (exitsArray.length > 0 ? exitsArray.join(", ") : "None") + '</em>', "#a6adc8");
+    }
+
+    function advanceTurn() {
+        for (let i = activeEffects.length - 1; i >= 0; i--) {
+            activeEffects[i].duration--;
+            if (activeEffects[i].duration <= 0) {
+                let eff = activeEffects.splice(i, 1)[0]; playerStats.minDmg -= eff.dmgEffect; playerStats.maxDmg -= eff.dmgEffect;
+                if (eff.hpEffect > 0) { playerStats.hp -= eff.hpEffect; if (playerStats.hp <= 0) playerStats.hp = 1; }
+                logGame("The effects of " + eff.name + " have worn off.", "#f9e2af"); updateHUD();
+            }
+        }
+    }
+
+    function checkInventory() {
+        if (playerInventory.length === 0) { logGame("Your inventory is empty.", "#bac2de"); return; }
+        let invStr = "<strong>Inventory:</strong><br>"; playerInventory.forEach(i => invStr += '> <strong>' + i.name + '</strong> - ' + i.description + '<br>'); logGame(invStr, "#f9e2af");
+    }
+
+    function takeItem(itemName) {
+        if (!itemName) { logGame("Take what?", "#f38ba8"); return false; } const room = playRooms[playCurrentRoomId];
+        if (!room.items || room.items.length === 0) { logGame("There's nothing here to take.", "#f38ba8"); return false; }
+        const idx = room.items.findIndex(i => i.name.toLowerCase() === itemName); if (idx === -1) { logGame("You don't see a " + itemName + " here.", "#f38ba8"); return false; }
+        const item = room.items.splice(idx, 1)[0]; playerInventory.push(item); let msg = "You picked up the " + item.name + ".";
+        if (item.type === 'equipment') { playerStats.maxHp += item.hpEffect; playerStats.hp += item.hpEffect; playerStats.minDmg += item.dmgEffect; playerStats.maxDmg += item.dmgEffect; msg += " (Passive stats applied)"; }
+        logGame(msg, "#a6e3a1"); updateHUD(); return true;
+    }
+
+    function dropItem(itemName) {
+        if (!itemName) { logGame("Drop what?", "#f38ba8"); return false; } const idx = playerInventory.findIndex(i => i.name.toLowerCase() === itemName);
+        if (idx === -1) { logGame("You don't have a " + itemName + ".", "#f38ba8"); return false; }
+        const item = playerInventory.splice(idx, 1)[0]; const room = playRooms[playCurrentRoomId]; if(!room.items) room.items = []; room.items.push(item);
+        let msg = "You dropped the " + item.name + ".";
+        if (item.type === 'equipment') { playerStats.maxHp -= item.hpEffect; playerStats.hp -= item.hpEffect; playerStats.minDmg -= item.dmgEffect; playerStats.maxDmg -= item.dmgEffect; if (playerStats.hp <= 0) playerStats.hp = 1; msg += " (Passive stats removed)"; }
+        logGame(msg, "#bac2de"); updateHUD(); return true;
+    }
+
+    function useItem(itemName) {
+        if (!itemName) { logGame("Use what?", "#f38ba8"); return false; } const idx = playerInventory.findIndex(i => i.name.toLowerCase() === itemName);
+        if (idx === -1) { logGame("You don't have a " + itemName + " to use.", "#f38ba8"); return false; }
+        if (playerInventory[idx].type === 'equipment') { logGame("You don't need to use that. Its stats apply automatically while in your inventory.", "#bac2de"); return false; }
+        const item = playerInventory.splice(idx, 1)[0]; 
+        playerStats.hp += item.hpEffect; if(playerStats.hp > playerStats.maxHp) playerStats.hp = playerStats.maxHp;
+        playerStats.minDmg += item.dmgEffect; playerStats.maxDmg += item.dmgEffect;
+        let msg = "You used the " + item.name + ".";
+        if (item.hpEffect > 0) msg += " Restored " + item.hpEffect + " HP."; if (item.hpEffect < 0) msg += " Lost " + Math.abs(item.hpEffect) + " HP."; if (item.dmgEffect > 0) msg += " Damage increased by " + item.dmgEffect + "!";
+        if (item.duration > 0) { let totalDuration = item.duration + (playerStats.wisdom || 0); activeEffects.push({ name: item.name, hpEffect: item.hpEffect, dmgEffect: item.dmgEffect, duration: totalDuration }); msg += " (Lasts " + totalDuration + " turns)"; }
+        logGame(msg, "#a6e3a1"); updateHUD(); 
+        if(playerStats.hp <= 0) { 
+            logGame("<strong>The item killed you.</strong>", "#f38ba8"); 
+            logGame(checkpointState ? "<em>GAME OVER. Type 'restart' to load checkpoint, or 'reset' to start over.</em>" : "<em>GAME OVER. Type 'restart' to try again.</em>", "#f38ba8");
+        }
+        return true;
+    }
+
+    function giveItem(payload) {
+        if (!payload || !payload.includes(" to ")) { logGame("Give what to who? (e.g., 'give [item] to [target]')", "#f38ba8"); return false; }
+        let parts = payload.split(" to "); let itemName = parts[0].trim(); let npcName = parts[1].trim();
+        const invIdx = playerInventory.findIndex(i => i.name.toLowerCase() === itemName); if (invIdx === -1) { logGame("You don't have a " + itemName + ".", "#f38ba8"); return false; }
+        const room = playRooms[playCurrentRoomId]; if (!room.npcs || room.npcs.length === 0) { logGame("There's no one here to give that to.", "#f38ba8"); return false; }
+        const npcIdx = room.npcs.findIndex(n => n.name.toLowerCase() === npcName && !n.isHidden); if (npcIdx === -1) { logGame("You don't see a " + npcName + " here.", "#f38ba8"); return false; }
+        let item = playerInventory.splice(invIdx, 1)[0]; if(!room.npcs[npcIdx].items) room.npcs[npcIdx].items = []; room.npcs[npcIdx].items.push(item);
+        logGame("You gave the " + item.name + " to " + room.npcs[npcIdx].name + ".", "#a6e3a1");
+        if (item.type === 'equipment') { playerStats.maxHp -= item.hpEffect; playerStats.hp -= item.hpEffect; playerStats.minDmg -= item.dmgEffect; playerStats.maxDmg -= item.dmgEffect; if (playerStats.hp <= 0) playerStats.hp = 1; }
+        updateHUD(); return true;
+    }
+
+    function talkToNPC(targetName) {
+        const room = playRooms[playCurrentRoomId]; if(!room.npcs || room.npcs.length === 0) { logGame("There is no one here to talk to.", "#f38ba8"); return false; }
+        let targetIndex = -1;
+        if (!targetName) { 
+            let visibleNpcs = room.npcs.filter(n => !n.isHidden);
+            if (visibleNpcs.length === 1) targetIndex = room.npcs.indexOf(visibleNpcs[0]); 
+            else { logGame("Talk to who?", "#f38ba8"); return false; } 
+        } 
+        else { targetIndex = room.npcs.findIndex(n => n.name.toLowerCase() === targetName.toLowerCase() && !n.isHidden); if(targetIndex === -1) { logGame("You don't see " + targetName + " here.", "#f38ba8"); return false; } }
+        let npc = room.npcs[targetIndex];
+        if (getEffectiveDisposition(npc) === 'Hostile') { logGame(npc.name + " doesn't want to talk, they want to kill you!", "#f38ba8"); return false; }
+        if (!npc.dialogue || !npc.dialogue.npcText) { logGame(npc.name + " has nothing to say to you.", "#bac2de"); return false; }
+        activeDialogue = { npc: npc, node: npc.dialogue }; printDialogueNode(); return false;
+    }
+
+    function printDialogueNode() {
+        logGame('<strong>[' + activeDialogue.npc.name + ']</strong> "' + activeDialogue.node.npcText + '"', "#89b4fa");
+        if (!activeDialogue.node.choices || activeDialogue.node.choices.length === 0) { logGame("<em>(Conversation ends)</em>", "#bac2de"); activeDialogue = null; } 
+        else { activeDialogue.node.choices.forEach((c, i) => { logGame('  [' + (i + 1) + '] ' + c.playerText, "#a6e3a1"); }); logGame("<em>(Type a number to reply, or 'leave')</em>", "#bac2de"); }
+    }
+
+    function getRandomInt(min, max) { return Math.floor(Math.random() * (max - min + 1)) + min; }
+    function getRandomMsg(arr, defaultMsg) { return (!arr || arr.length === 0 || arr[0] === "") ? defaultMsg : arr[Math.floor(Math.random() * arr.length)]; }
+
+    function handleCombat(targetName) {
+        const room = playRooms[playCurrentRoomId];
+        if(!room.npcs || room.npcs.length === 0) { logGame("There is no one here to attack.", "#f38ba8"); return false; }
+        let targetIndex = -1;
+        if (!targetName) {
+            let visibleNpcs = room.npcs.filter(n => !n.isHidden);
+            if (visibleNpcs.length === 1) targetIndex = room.npcs.indexOf(visibleNpcs[0]); 
+            else { logGame("Who do you want to attack?", "#f38ba8"); return false; }
+        } else {
+            targetIndex = room.npcs.findIndex(n => n.name.toLowerCase() === targetName.toLowerCase() && !n.isHidden);
+            if(targetIndex === -1) { logGame("You don't see a " + targetName + " here.", "#f38ba8"); return false; }
+        }
+        let npc = room.npcs[targetIndex];
+        let currentDisp = getEffectiveDisposition(npc);
+        if (currentDisp === 'Neutral') { logGame("You attacked a neutral entity! " + npc.name + " turns hostile!", "#f38ba8"); npc.friendliness = 0; } 
+        else if (currentDisp === 'Friendly') { logGame("You attack " + npc.name + ", but they refuse to fight back.", "#bac2de"); }
+        let dmg = getRandomInt(playerStats.minDmg, playerStats.maxDmg); npc.hp -= dmg;
+        let atkMsg = getRandomMsg(playerStats.atkMsgs, "You hit the {target}!").replace(/{target}/g, npc.name); logGame(atkMsg + " (Dealt " + dmg + " damage)", "#a6e3a1");
+        
+        if(npc.hp <= 0) {
+            let xpGain = getRandomInt(npc.minXp !== undefined ? npc.minXp : 2, npc.maxXp !== undefined ? npc.maxXp : 5); playerStats.xp += xpGain;
+            let deathMsg = getRandomMsg(npc.deathMsgs, "The {npc} dies.").replace(/{npc}/g, npc.name); logGame(deathMsg + " (Gained " + xpGain + " XP)", "#f9e2af"); 
+            if (npc.items && npc.items.length > 0) { if (!room.items) room.items = []; npc.items.forEach(it => { room.items.push(it); logGame("The " + npc.name + " dropped a " + it.name + ".", "#f9e2af"); }); }
+            room.npcs.splice(targetIndex, 1);
+        }
+        enemiesAttack(); 
+        if(playerStats.hp > 0) checkLevelUp();
+        return true;
+    }
+
+    function enemiesAttack() {
+        if(playerStats.hp <= 0) return; const room = playRooms[playCurrentRoomId]; if(!room.npcs) return;
+        room.npcs.forEach(npc => {
+            if(getEffectiveDisposition(npc) === 'Hostile' && npc.hp > 0 && !npc.isHidden) {
+                let dmg = getRandomInt(npc.minDmg, npc.maxDmg); playerStats.hp -= dmg;
+                let atkMsg = getRandomMsg(npc.atkMsgs, "The {npc} attacks you!").replace(/{npc}/g, npc.name); logGame(atkMsg + " (Took " + dmg + " damage)", "#f38ba8");
+            }
+        });
+        updateHUD(); 
+        if(playerStats.hp <= 0) { 
+            logGame('<strong>' + getRandomMsg(playerStats.deathMsgs, "You died.") + '</strong>', "#f38ba8"); 
+            logGame(checkpointState ? "<em>GAME OVER. Type 'restart' to load checkpoint, or 'reset' to start over.</em>" : "<em>GAME OVER. Type 'restart' to try again.</em>", "#f38ba8");
+        }
+    }
+
+    function getActionPayload(cmd, aliasesArray) {
+        if (!aliasesArray) return null;
+        for (let alias of aliasesArray) { if (cmd === alias) return ""; if (cmd.startsWith(alias + " ")) return cmd.substring(alias.length).trim(); }
+        return null;
+    }
+
+    function parseCommand() {
+        if (currentMusicUrl && bgMusic.paused) { let p = bgMusic.play(); if(p!==undefined) p.catch(e=>{}); }
+        const rawCmd = cmdInput.value.trim(); if (!rawCmd) return; cmdInput.value = ''; const cmd = rawCmd.toLowerCase(); logGame('> <strong>' + rawCmd + '</strong>', "#cdd6f4");
+        
+        if (cmd === 'reset') { startTest(); return; }
+        if (cmd === 'restart') { checkpointState ? loadCheckpoint() : startTest(); return; }
+
+        if(playerStats.hp <= 0) { logGame(checkpointState ? "You are dead. Type 'restart' for checkpoint, or 'reset' to start over." : "You are dead. Type 'restart' to try again.", "#f38ba8"); return; }
+        if(gameWon) { logGame("You have already won. Type 'restart' to play again.", "#a6e3a1"); return; }
+
+        if (isLevelingUp) {
+            let choice = parseInt(cmd);
+            if (choice === 1) { playerStats.maxHp += 10; playerStats.hp += 10; logGame("Max HP increased by 10!", "#a6e3a1"); }
+            else if (choice === 2) { playerStats.minDmg += 1; playerStats.maxDmg += 1; logGame("Base Damage increased by 1!", "#a6e3a1"); }
+            else if (choice === 3) { playerStats.wisdom += 1; logGame("Wisdom increased by 1!", "#a6e3a1"); }
+            else if (choice === 4) { playerStats.stealth += 1; logGame("Stealth increased by 1!", "#a6e3a1"); }
+            else if (choice === 5) { playerStats.charisma += 1; logGame("Charisma increased by 1!", "#a6e3a1"); }
+            else { logGame("Please type a number from 1 to 5.", "#f38ba8"); return; }
+            
+            isLevelingUp = false; updateHUD();
+            if (playerStats.xp >= playerStats.xpNeeded) checkLevelUp(); else look();
+            cmdInput.focus(); return;
+        }
+
+        if (activeDialogue) {
+            if (isHidden) breakStealth();
+            if (cmd === 'leave' || cmd === 'exit' || cmd === 'bye') { logGame("You end the conversation.", "#bac2de"); activeDialogue = null; look(); return; }
+            let choiceNum = parseInt(cmd);
+            if (!isNaN(choiceNum) && choiceNum > 0 && choiceNum <= activeDialogue.node.choices.length) {
+                let choice = activeDialogue.node.choices[choiceNum - 1]; logGame('> You say: "' + choice.playerText + '"', "#a6e3a1");
+                
+                if (choice.giveItems) {
+                    let itemsToGive = choice.giveItems.split(',').map(s => s.trim().toLowerCase()).filter(s => s);
+                    itemsToGive.forEach(itemName => {
+                        if (activeDialogue.npc.items) {
+                            let npcItemIdx = activeDialogue.npc.items.findIndex(i => i.name.toLowerCase() === itemName);
+                            if (npcItemIdx !== -1) {
+                                let givenItem = activeDialogue.npc.items.splice(npcItemIdx, 1)[0];
+                                playerInventory.push(givenItem);
+                                let giveMsg = '> ' + activeDialogue.npc.name + ' gives you the ' + givenItem.name + '.';
+                                if (givenItem.type === 'equipment') {
+                                    playerStats.maxHp += givenItem.hpEffect; playerStats.hp += givenItem.hpEffect;
+                                    playerStats.minDmg += givenItem.dmgEffect; playerStats.maxDmg += givenItem.dmgEffect;
+                                    giveMsg += " (Passive stats applied)";
+                                }
+                                logGame(giveMsg, "#f9e2af");
+                            }
+                        }
+                    });
+                    updateHUD();
+                }
+
+                if (choice.npcAction && choice.npcAction !== 'none') {
+                    let r = playRooms[playCurrentRoomId]; let nIdx = r.npcs.findIndex(n => n === activeDialogue.npc);
+                    if (choice.npcAction === 'vanish') {
+                        logGame('> ' + activeDialogue.npc.name + ' vanishes!', "#bac2de");
+                        if (nIdx !== -1) r.npcs.splice(nIdx, 1);
+                        activeDialogue = null; look(); return;
+                    } 
+                    else if (choice.npcAction === 'move') {
+                        let tRoom = choice.actionTarget.trim();
+                        if (playRooms[tRoom]) {
+                            logGame('> ' + activeDialogue.npc.name + ' leaves.', "#bac2de");
+                            if (nIdx !== -1) {
+                                let movingNpc = r.npcs.splice(nIdx, 1)[0];
+                                if (!playRooms[tRoom].npcs) playRooms[tRoom].npcs = [];
+                                playRooms[tRoom].npcs.push(movingNpc);
+                            }
+                        } else { logGame('> ' + activeDialogue.npc.name + ' tries to leave, but the destination doesn\\'t exist!', "#bac2de"); }
+                        activeDialogue = null; look(); return;
+                    } 
+                    else if (choice.npcAction === 'attack') {
+                        logGame('> ' + activeDialogue.npc.name + ' suddenly attacks!', "#f38ba8");
+                        activeDialogue.npc.friendliness = 0; activeDialogue = null; enemiesAttack(); return;
+                    } 
+                    else if (choice.npcAction === 'steal') {
+                        let itemName = choice.actionTarget.trim().toLowerCase();
+                        let pIdx = playerInventory.findIndex(i => i.name.toLowerCase() === itemName);
+                        if (pIdx !== -1) {
+                            let stolen = playerInventory.splice(pIdx, 1)[0];
+                            if (!activeDialogue.npc.items) activeDialogue.npc.items = [];
+                            activeDialogue.npc.items.push(stolen);
+                            logGame('> ' + activeDialogue.npc.name + ' steals your ' + stolen.name + '!', "#f38ba8");
+                            if (stolen.type === 'equipment') {
+                                playerStats.maxHp -= stolen.hpEffect; playerStats.hp -= stolen.hpEffect;
+                                playerStats.minDmg -= stolen.dmgEffect; playerStats.maxDmg -= stolen.dmgEffect;
+                                if (playerStats.hp <= 0) playerStats.hp = 1;
+                            }
+                            updateHUD();
+                        } else { logGame('> ' + activeDialogue.npc.name + ' tries to steal something, but you don\\'t have it!', "#bac2de"); }
+                    }
+                }
+
+                if (choice.nextNode) { activeDialogue.node = choice.nextNode; printDialogueNode(); } else { logGame("<em>(Conversation ends)</em>", "#bac2de"); activeDialogue = null; look(); }
+            } else { logGame("Please type a valid number to reply, or type 'leave'.", "#f38ba8"); }
+            return; 
+        }
+
+        let currentRoom = playRooms[playCurrentRoomId];
+        if (currentRoom.eventCmd) {
+            let triggers = currentRoom.eventCmd.split(',').map(s => s.trim().toLowerCase()).filter(s => s);
+            if (triggers.includes(cmd)) {
+                if (currentRoom.eventMsg) logGame('<em>' + currentRoom.eventMsg + '</em>', "#cba6f7");
+                
+                let revealedHostile = false;
+                if (currentRoom.eventReveal && currentRoom.npcs) {
+                    currentRoom.npcs.forEach(n => {
+                        if (n.isHidden) {
+                            n.isHidden = false;
+                            logGame('> ' + n.name + ' is revealed!', "#f9e2af");
+                            if (getEffectiveDisposition(n) === 'Hostile') revealedHostile = true;
+                        }
+                    });
+                }
+                
+                if (revealedHostile) { breakStealth(true); enemiesAttack(); }
+
+                if (currentRoom.eventMove && playRooms[currentRoom.eventMove]) {
+                    playCurrentRoomId = currentRoom.eventMove;
+                    playRoomMusic(playRooms[playCurrentRoomId].music || "");
+                    if (playRooms[playCurrentRoomId].isCheckpoint) saveCheckpoint();
+                    look(); checkStealthOnEntry(); 
+                } else if (!revealedHostile) {
+                    advanceTurn();
+                }
+                
+                cmdInput.focus(); return; 
+            }
+        }
+
+        let matchedDirection = null; 
+        for (let dir of ['North', 'South', 'East', 'West']) { if (aliases[dir] && aliases[dir].includes(cmd)) { matchedDirection = dir; break; } }
+        let tookAction = false; let payload; let isNoisy = false;
+
+        if (matchedDirection) tookAction = move(matchedDirection);
+        else if ((payload = getActionPayload(cmd, aliases.look)) !== null) look();
+        else if ((payload = getActionPayload(cmd, aliases.inv)) !== null) checkInventory();
+        else if ((payload = getActionPayload(cmd, aliases.take)) !== null) { tookAction = takeItem(payload); isNoisy = true; }
+        else if ((payload = getActionPayload(cmd, aliases.drop)) !== null) { tookAction = dropItem(payload); isNoisy = true; }
+        else if ((payload = getActionPayload(cmd, aliases.use)) !== null) { tookAction = useItem(payload); isNoisy = true; }
+        else if ((payload = getActionPayload(cmd, aliases.attack)) !== null) { if (isHidden) breakStealth(true); tookAction = handleCombat(payload); isNoisy = false; }
+        else if ((payload = getActionPayload(cmd, aliases.give)) !== null) { tookAction = giveItem(payload); isNoisy = true; }
+        else if ((payload = getActionPayload(cmd, aliases.talk)) !== null) { tookAction = talkToNPC(payload); isNoisy = true; }
+        else logGame("I don't understand that command.", "#f38ba8");
+        
+        if(tookAction) { if (isNoisy) breakStealth(); advanceTurn(); checkVictory(); }
+        cmdInput.focus();
+    }
+
+    function move(direction) {
+        const room = playRooms[playCurrentRoomId]; let hostiles = room.npcs ? room.npcs.filter(n => getEffectiveDisposition(n) === 'Hostile' && !n.isHidden) : [];
+        if(hostiles.length > 0 && !isHidden) { logGame("You can't flee while enemies are present!", "#f38ba8"); enemiesAttack(); return true; }
+        if (room.exits[direction]) { 
+            if (room.locks && room.locks[direction]) {
+                const reqKey = room.locks[direction].toLowerCase(); const hasKey = playerInventory.some(i => i.name.toLowerCase() === reqKey);
+                if (hasKey) { logGame("You unlock the door using the " + room.locks[direction] + ".", "#a6e3a1"); delete room.locks[direction]; } 
+                else { logGame("The way is locked. You need: " + room.locks[direction] + ".", "#f38ba8"); return false; }
+            }
+            playCurrentRoomId = room.exits[direction]; 
+            playRoomMusic(playRooms[playCurrentRoomId].music || "");
+            if (playRooms[playCurrentRoomId].isCheckpoint) saveCheckpoint(); // SAVE ON ENTRY
+            look(); checkStealthOnEntry(); return true; 
+        } else { logGame("You can't go that way.", "#f38ba8"); return false; }
+    }
+    
+    // Auto-Start Exported Game
+    startTest();
+<\/script>
+</body></html>`;
+
+            try {
+                // Check if browser supports the modern File System Access API
+                if (window.showSaveFilePicker) {
+                    
+                    // First time exporting this session: Ask user to designate a file
+                    if (!currentFileHandle) {
+                        currentFileHandle = await window.showSaveFilePicker({
+                            suggestedName: `${safeName}_v${gameVersion}.html`,
+                            types: [{ description: 'HTML Game File', accept: {'text/html': ['.html']} }],
+                        });
+                    }
+                    
+                    // Instantly overwrite the designated file
+                    const writable = await currentFileHandle.createWritable();
+                    await writable.write(standaloneHTML);
+                    await writable.close();
+                    
+                    logGame(`<em>Saved to designated file: ${currentFileHandle.name} (Version ${gameVersion})</em>`, "#a6e3a1");
+                } else {
+                    // Fallback for Firefox/older browsers that don't support the API
+                    const blob = new Blob([standaloneHTML], { type: 'text/html' });
+                    const url = URL.createObjectURL(blob);
+                    const a = document.createElement('a'); a.href = url; a.download = `${safeName}_v${gameVersion}.html`;
+                    document.body.appendChild(a); a.click(); document.body.removeChild(a); URL.revokeObjectURL(url);
+                }
+                
+                gameVersion++;
+            } catch (err) {
+                // Ignore if user hit "Cancel" on the file picker
+                if (err.name !== 'AbortError') { console.error(err); alert("Error saving file."); }
+            }
+        }
+        
+        // --- IMPORT LOGIC ---
+        // --- IMPORT LOGIC ---
+        function importGame(event) {
+            const file = event.target.files[0];
+            if (!file) return;
+
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                const content = e.target.result;
+                try {
+                    // Search the exported HTML string for the core data blocks
+                    const match = content.match(/let playRooms = (\{.*?\}); const aliases = (\{.*?\}); let playerStats = (\{.*?\}); let victoryConditions = (\{.*?\});/s);
+                    // Search for the new metadata block
+                    const metaMatch = content.match(/let gameMeta = (\{.*?\});/);
+                    
+                    if (match) {
+                        rooms = JSON.parse(match[1]);
+                        aliases = JSON.parse(match[2]);
+                        playerStats = JSON.parse(match[3]);
+                        victoryConditions = JSON.parse(match[4]);
+
+                        // Handle Game Name and Version tracking
+                        if (metaMatch) {
+                            let importedMeta = JSON.parse(metaMatch[1]);
+                            document.getElementById('game-name-input').value = importedMeta.name || "My Epic Quest";
+                            // Set the editor's current version to 1 higher than the file it just loaded
+                            gameVersion = (importedMeta.version !== undefined ? parseInt(importedMeta.version) : 0) + 1;
+                        } else {
+                            // Backwards compatibility for your older saves that didn't have versions
+                            gameVersion = 1; 
+                        }
+
+                        let maxId = 0;
+                        for (let id in rooms) { if (parseInt(id) > maxId) maxId = parseInt(id); }
+                        roomIdCounter = maxId + 1;
+
+                        selectedRoomId = null; playCurrentRoomId = null;
+                        mapZoom = 1.0; mapOffsetX = 0; mapOffsetY = 0;
+                        checkpointState = null; currentFileHandle = null;
+                        bgMusic.pause(); bgMusic.removeAttribute('src'); bgMusic.load(); currentMusicUrl = "";
+                        cancelNPCEdit(); cancelItemEdit();
+
+                        document.getElementById('player-hp').value = playerStats.maxHp || 100;
+                        document.getElementById('player-min-dmg').value = playerStats.minDmg || 5;
+                        document.getElementById('player-max-dmg').value = playerStats.maxDmg || 15;
+                        document.getElementById('player-wis').value = playerStats.wisdom || 0;
+                        document.getElementById('player-stl').value = playerStats.stealth || 0;
+                        document.getElementById('player-cha').value = playerStats.charisma || 0;
+                        document.getElementById('player-atk-msgs').value = (playerStats.atkMsgs || []).join(' | ');
+                        document.getElementById('player-death-msgs').value = (playerStats.deathMsgs || []).join(' | ');
+
+                        const actions = ['North', 'South', 'East', 'West', 'look', 'inv', 'take', 'drop', 'use', 'attack', 'give', 'talk'];
+                        actions.forEach(act => { if (aliases[act]) document.getElementById('alias-' + act).value = aliases[act].join(', '); });
+
+                        document.getElementById('vic-msg').value = victoryConditions.victoryMessage || "You have achieved victory!";
+                        updateEditorUI(); 
+                        document.getElementById('vic-room').value = victoryConditions.targetRoomId || 'none';
+                        renderVicLists();
+                        
+                        drawMap();
+                        logGame("<strong>Game imported successfully!</strong>", "#a6e3a1");
+                    } else {
+                        alert("Could not parse the game data. Ensure this is a valid exported HTML file.");
+                    }
+                } catch (err) {
+                    console.error(err);
+                    alert("Error reading the imported file.");
+                }
+                event.target.value = ''; 
+            };
+            reader.readAsText(file);
+        }
+
+        // Init
+        renderVicLists(); updateAliases(); updatePlayerStats(); drawMap();
+    </script>
+</body>
+</html>
