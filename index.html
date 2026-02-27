@@ -69,7 +69,7 @@
         <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px;">
             <button onclick="newGame()">New</button>
             <button onclick="document.getElementById('import-file').click()" style="background: #f9e2af; color: #11111b;">📂 Import</button>
-            <button onclick="triggerExport()" style="background: #a6e3a1; color: #11111b;">💾 Export</button>
+            <button onclick="exportGame()" style="background: #a6e3a1; color: #11111b;">💾 Export</button>
         </div>
         <input type="file" id="import-file" accept=".html" style="display: none;" onchange="importGame(event)">
         <label style="font-size: 0.9em; margin-top: 10px; display: block;">Game Name: <input type="text" id="game-name-input" value="My Epic Quest"></label>
@@ -95,6 +95,12 @@
 
         <h3 class="collapse-header color-vic" onclick="toggleSection('vic')">Victory Conditions <span id="icon-vic">▶</span></h3>
         <div id="section-vic" class="hidden">
+            <div style="display:flex; gap:5px; margin-bottom:10px;">
+                <select id="vic-select" onchange="changeVic(this.value)" style="flex-grow:1; margin-top:0;"></select>
+                <button onclick="addVic()" style="width:auto; margin:0; padding:5px 10px; background:#a6e3a1;">New</button>
+                <button onclick="delVic()" style="width:auto; margin:0; padding:5px 10px; background:#f38ba8;">Del</button>
+            </div>
+            <label style="font-size: 0.9em;">Ending Name: <input type="text" id="vic-name" oninput="updateVictory()"></label>
             <label style="font-size: 0.9em;">Must be in Room: <select id="vic-room" onchange="updateVictory()"><option value="none">Any Room</option></select></label>
             
             <div style="margin-top:5px; font-size:0.9em;">Require Item(s):
@@ -274,10 +280,12 @@
         let activeDialogue = null; let tempDialogueTree = null; let isHidden = false; let isLevelingUp = false;
         let checkpointState = null; 
 
-        let victoryConditions = { targetRoomId: 'none', requiredItems: [], deadNPCs: [], victoryMessage: "You have achieved victory!" };
-        let gameVersion = 0;
+        // Correctly formatted multi-ending array
+        let victoryConditions = [{ name: "Ending 1", targetRoomId: 'none', requiredItems: [], deadNPCs: [], victoryMessage: "You have achieved victory!" }];
+        let editingVicIdx = 0;
+
+        let gameVersion = 0; let currentFileHandle = null;
         let mapZoom = 1.0; let mapOffsetX = 0; let mapOffsetY = 0; let isDragging = false; let dragStartX = 0; let dragStartY = 0;
-        let currentFileHandle = null;
 
         const canvas = document.getElementById('mapCanvas'); const ctx = canvas.getContext('2d');
         const roomEditor = document.getElementById('room-editor'); const noSelection = document.getElementById('no-selection');
@@ -297,13 +305,8 @@
         const btnInitDialogue = document.getElementById('btn-init-dialogue');
 
         function toggleSection(sec) {
-            const el = document.getElementById('section-' + sec);
-            const icon = document.getElementById('icon-' + sec);
-            if (el.classList.contains('hidden')) {
-                el.classList.remove('hidden'); icon.innerText = '▼';
-            } else {
-                el.classList.add('hidden'); icon.innerText = '▶';
-            }
+            const el = document.getElementById('section-' + sec); const icon = document.getElementById('icon-' + sec);
+            if (el.classList.contains('hidden')) { el.classList.remove('hidden'); icon.innerText = '▼'; } else { el.classList.add('hidden'); icon.innerText = '▶'; }
         }
 
         function switchRoomTab(tabName) {
@@ -315,10 +318,7 @@
 
         function updateAliases() {
             const actions = ['North', 'South', 'East', 'West', 'look', 'inv', 'take', 'drop', 'use', 'attack', 'give', 'talk'];
-            actions.forEach(act => {
-                const el = document.getElementById('alias-' + act);
-                if (el) aliases[act] = el.value.split(',').map(s => s.trim().toLowerCase()).filter(s => s);
-            });
+            actions.forEach(act => { const el = document.getElementById('alias-' + act); if (el) aliases[act] = el.value.split(',').map(s => s.trim().toLowerCase()).filter(s => s); });
         }
 
         function updatePlayerStats() {
@@ -332,21 +332,48 @@
             playerStats.deathMsgs = document.getElementById('player-death-msgs').value.split('|').map(s => s.trim());
         }
 
-        function updateVictory() {
-            victoryConditions.targetRoomId = document.getElementById('vic-room').value;
-            victoryConditions.victoryMessage = document.getElementById('vic-msg').value;
+        function changeVic(idx) { editingVicIdx = parseInt(idx); updateVicUI(); }
+        function addVic() { victoryConditions.push({ name: `Ending ${victoryConditions.length + 1}`, targetRoomId: 'none', requiredItems: [], deadNPCs: [], victoryMessage: "You have achieved victory!" }); editingVicIdx = victoryConditions.length - 1; updateVicUI(); }
+        function delVic() { if (victoryConditions.length > 1) { victoryConditions.splice(editingVicIdx, 1); editingVicIdx = 0; updateVicUI(); } else { alert("You must have at least one ending."); } }
+        
+        function updateVicUI() {
+            let vc = victoryConditions[editingVicIdx];
+            if (!vc) { editingVicIdx = 0; vc = victoryConditions[0]; }
+            document.getElementById('vic-name').value = vc.name || `Ending ${editingVicIdx + 1}`;
+            
+            let vicRoom = document.getElementById('vic-room'); 
+            vicRoom.innerHTML = '<option value="none">Any Room</option>';
+            for(let id in rooms) { vicRoom.innerHTML += `<option value="${id}">${rooms[id].name}</option>`; }
+            vicRoom.value = rooms[vc.targetRoomId] ? vc.targetRoomId : 'none';
+            
+            document.getElementById('vic-msg').value = vc.victoryMessage;
+            renderVicLists();
+            
+            let select = document.getElementById('vic-select');
+            select.innerHTML = '';
+            victoryConditions.forEach((v, i) => { select.innerHTML += `<option value="${i}">${v.name || 'Ending '+(i+1)}</option>`; });
+            select.value = editingVicIdx;
         }
 
-        function addVicItem() { let val = document.getElementById('vic-item-input').value.trim(); if(val && !victoryConditions.requiredItems.includes(val)) { victoryConditions.requiredItems.push(val); document.getElementById('vic-item-input').value = ''; renderVicLists(); } }
-        function removeVicItem(idx) { victoryConditions.requiredItems.splice(idx,1); renderVicLists(); }
-        function addVicNPC() { let val = document.getElementById('vic-npc-input').value.trim(); if(val && !victoryConditions.deadNPCs.includes(val)) { victoryConditions.deadNPCs.push(val); document.getElementById('vic-npc-input').value = ''; renderVicLists(); } }
-        function removeVicNPC(idx) { victoryConditions.deadNPCs.splice(idx,1); renderVicLists(); }
+        function updateVictory() {
+            let vc = victoryConditions[editingVicIdx];
+            vc.name = document.getElementById('vic-name').value;
+            vc.targetRoomId = document.getElementById('vic-room').value;
+            vc.victoryMessage = document.getElementById('vic-msg').value;
+            document.getElementById('vic-select').options[editingVicIdx].text = vc.name;
+        }
+
+        function addVicItem() { let val = document.getElementById('vic-item-input').value.trim(); if(val && !victoryConditions[editingVicIdx].requiredItems.includes(val)) { victoryConditions[editingVicIdx].requiredItems.push(val); document.getElementById('vic-item-input').value = ''; renderVicLists(); } }
+        function removeVicItem(idx) { victoryConditions[editingVicIdx].requiredItems.splice(idx,1); renderVicLists(); }
+        function addVicNPC() { let val = document.getElementById('vic-npc-input').value.trim(); if(val && !victoryConditions[editingVicIdx].deadNPCs.includes(val)) { victoryConditions[editingVicIdx].deadNPCs.push(val); document.getElementById('vic-npc-input').value = ''; renderVicLists(); } }
+        function removeVicNPC(idx) { victoryConditions[editingVicIdx].deadNPCs.splice(idx,1); renderVicLists(); }
         
         function renderVicLists() {
-            let iList = document.getElementById('vic-items-list'); iList.innerHTML = victoryConditions.requiredItems.length ? '' : 'None';
-            victoryConditions.requiredItems.forEach((it, idx) => iList.innerHTML += `<div style="display:flex; justify-content:space-between;">- ${it} <button onclick="removeVicItem(${idx})" style="background:none;color:#f38ba8;border:none;cursor:pointer;padding:0;">[x]</button></div>`);
-            let nList = document.getElementById('vic-npcs-list'); nList.innerHTML = victoryConditions.deadNPCs.length ? '' : 'None';
-            victoryConditions.deadNPCs.forEach((npc, idx) => nList.innerHTML += `<div style="display:flex; justify-content:space-between;">- ${npc} <button onclick="removeVicNPC(${idx})" style="background:none;color:#f38ba8;border:none;cursor:pointer;padding:0;">[x]</button></div>`);
+            let vc = victoryConditions[editingVicIdx];
+            let iList = document.getElementById('vic-items-list'); iList.innerHTML = vc.requiredItems.length ? '' : 'None';
+            vc.requiredItems.forEach((it, idx) => iList.innerHTML += `<div style="display:flex; justify-content:space-between;">- ${it} <button onclick="removeVicItem(${idx})" style="background:none;color:#f38ba8;border:none;cursor:pointer;padding:0;">[x]</button></div>`);
+            let nList = document.getElementById('vic-npcs-list'); nList.innerHTML = vc.deadNPCs.length ? '' : 'None';
+            vc.deadNPCs.forEach((npc, idx) => nList.innerHTML += `<div style="display:flex; justify-content:space-between;">- ${npc} <button onclick="removeVicNPC(${idx})" style="background:none;color:#f38ba8;border:none;cursor:pointer;padding:0;">[x]</button></div>`);
         }
 
         function newGame() {
@@ -355,22 +382,17 @@
                 checkpointState = null; gameVersion = 0; currentFileHandle = null;
                 document.getElementById('game-name-input').value = "My Epic Quest";
                 bgMusic.pause(); bgMusic.removeAttribute('src'); bgMusic.load(); currentMusicUrl = "";
-                victoryConditions = { targetRoomId: 'none', requiredItems: [], deadNPCs: [], victoryMessage: "You have achieved victory!" };
-                document.getElementById('vic-msg').value = victoryConditions.victoryMessage;
-                renderVicLists(); cancelNPCEdit(); cancelItemEdit();
+                victoryConditions = [{ name: "Ending 1", targetRoomId: 'none', requiredItems: [], deadNPCs: [], victoryMessage: "You have achieved victory!" }];
+                editingVicIdx = 0;
+                updateVicUI(); cancelNPCEdit(); cancelItemEdit();
                 updateEditorUI(); drawMap(); logGame("Game reset. Ready to build."); playerStatusUI.classList.add('hidden');
             }
         }
 
-        // Prevent right click menu
         canvas.addEventListener('contextmenu', e => e.preventDefault());
-
         canvas.addEventListener('mousedown', (e) => {
-            if (e.button === 2) { 
-                isDragging = true; dragStartX = e.clientX - mapOffsetX; dragStartY = e.clientY - mapOffsetY; return;
-            }
+            if (e.button === 2) { isDragging = true; dragStartX = e.clientX - mapOffsetX; dragStartY = e.clientY - mapOffsetY; return; }
             const rect = canvas.getBoundingClientRect(); 
-            // FIXED TYPO HERE: (rect.top was missing 'rect.')
             const x = (e.clientX - rect.left - mapOffsetX) / mapZoom; const y = (e.clientY - rect.top - mapOffsetY) / mapZoom;
             let clickedRoomId = null;
             for (const id in rooms) { if (x >= rooms[id].x - 20 && x <= rooms[id].x + 20 && y >= rooms[id].y - 20 && y <= rooms[id].y + 20) { clickedRoomId = id; break; } }
@@ -408,10 +430,7 @@
         }
 
         function updateEditorUI() {
-            let vicRoom = document.getElementById('vic-room'); let currentVicRoom = victoryConditions.targetRoomId;
-            vicRoom.innerHTML = '<option value="none">Any Room</option>';
-            for(let id in rooms) { vicRoom.innerHTML += `<option value="${id}">${rooms[id].name}</option>`; }
-            vicRoom.value = rooms[currentVicRoom] ? currentVicRoom : 'none';
+            updateVicUI(); 
 
             if (!selectedRoomId || !rooms[selectedRoomId]) { roomEditor.classList.add('hidden'); noSelection.classList.remove('hidden'); return; }
             roomEditor.classList.remove('hidden'); noSelection.classList.add('hidden');
@@ -422,7 +441,6 @@
             musicInput.value = room.music || ''; imageInput.value = room.image || '';
             document.getElementById('room-checkpoint').checked = !!room.isCheckpoint;
 
-            // Load Events UI
             document.getElementById('room-event-cmd').value = room.eventCmd || '';
             document.getElementById('room-event-msg').value = room.eventMsg || '';
             document.getElementById('room-event-reveal').checked = !!room.eventReveal;
@@ -432,9 +450,7 @@
             eventMoveSelect.innerHTML = '<option value="">None</option>';
 
             for (const id in rooms) { 
-                if (id != selectedRoomId) { 
-                    const opt = document.createElement('option'); opt.value = id; opt.textContent = rooms[id].name; exitTargetSelect.appendChild(opt); 
-                }
+                if (id != selectedRoomId) { const opt = document.createElement('option'); opt.value = id; opt.textContent = rooms[id].name; exitTargetSelect.appendChild(opt); }
                 const evtOpt = document.createElement('option'); evtOpt.value = id; evtOpt.textContent = rooms[id].name; eventMoveSelect.appendChild(evtOpt); 
             }
             eventMoveSelect.value = room.eventMove || '';
@@ -483,10 +499,8 @@
 
         function updateRoom() { 
             if (selectedRoomId && rooms[selectedRoomId]) { 
-                rooms[selectedRoomId].name = nameInput.value; 
-                rooms[selectedRoomId].description = descInput.value; 
-                rooms[selectedRoomId].music = musicInput.value.trim(); 
-                rooms[selectedRoomId].image = imageInput.value.trim(); 
+                rooms[selectedRoomId].name = nameInput.value; rooms[selectedRoomId].description = descInput.value; 
+                rooms[selectedRoomId].music = musicInput.value.trim(); rooms[selectedRoomId].image = imageInput.value.trim(); 
                 rooms[selectedRoomId].isCheckpoint = document.getElementById('room-checkpoint').checked;
                 rooms[selectedRoomId].eventCmd = document.getElementById('room-event-cmd').value.trim();
                 rooms[selectedRoomId].eventMsg = document.getElementById('room-event-msg').value.trim();
@@ -509,7 +523,12 @@
         function deleteExit(dir) { if (!selectedRoomId) return; delete rooms[selectedRoomId].exits[dir]; if (rooms[selectedRoomId].locks) delete rooms[selectedRoomId].locks[dir]; updateEditorUI(); drawMap(); }
 
         // --- DIALOGUE EDITOR LOGIC ---
-        function getDiagNodeByPath(pathStr) { let indices = pathStr.split(','); let curr = tempDialogueTree; for(let i of indices) { curr = curr.choices[parseInt(i)].nextNode; } return curr; }
+        function getDiagNodeByPath(pathStr) { 
+            if (!pathStr) return tempDialogueTree; 
+            let indices = pathStr.split(','); let curr = tempDialogueTree; 
+            for(let i of indices) { if (i.trim() !== "") curr = curr.choices[parseInt(i)].nextNode; } 
+            return curr; 
+        }
         function updateDiagNPC(pathStr, val) { let n = getDiagNodeByPath(pathStr); if(n) n.npcText = val; }
         function updateDiagPlayer(pathStr, choiceIdx, val) { let n = getDiagNodeByPath(pathStr); if(n && n.choices[choiceIdx]) n.choices[choiceIdx].playerText = val; }
         function updateDiagGive(pathStr, choiceIdx, val) { let n = getDiagNodeByPath(pathStr); if(n && n.choices[choiceIdx]) n.choices[choiceIdx].giveItems = val; }
@@ -527,7 +546,7 @@
                     let childPath = pathStr ? `${pathStr},${idx}` : `${idx}`;
                     html += `<div class="diag-thread diag-thread-player"><div class="diag-player-label">Player Reply: <button class="btn-del" onclick="delDiagChoice('${pathStr}', ${idx})">X</button></div><input class="diag-input" type="text" value="${choice.playerText.replace(/"/g, '&quot;')}" oninput="updateDiagPlayer('${pathStr}', ${idx}, this.value)">`;
                     html += `<div class="diag-npc-label" style="margin-top:4px; color:#a6adc8;">NPC Gives Item(s) (Comma separated):</div><input class="diag-input" type="text" placeholder="e.g. Health Potion" value="${(choice.giveItems||'').replace(/"/g, '&quot;')}" oninput="updateDiagGive('${pathStr}', ${idx}, this.value)">`;
-                    html += `<div class="diag-npc-label" style="margin-top:4px; color:#f38ba8;">Trigger Special Action:</div><div style="display:flex; gap:5px;"><select class="diag-input" onchange="updateDiagAction('${pathStr}', ${idx}, this.value)" style="width:40%;"><option value="none" ${choice.npcAction === 'none' ? 'selected' : ''}>None</option><option value="vanish" ${choice.npcAction === 'vanish' ? 'selected' : ''}>Vanish</option><option value="move" ${choice.npcAction === 'move' ? 'selected' : ''}>Move (Room ID)</option><option value="steal" ${choice.npcAction === 'steal' ? 'selected' : ''}>Steal (Item)</option><option value="attack" ${choice.npcAction === 'attack' ? 'selected' : ''}>Attack Player</option></select><input class="diag-input" type="text" placeholder="Target (Room ID or Item)" value="${(choice.actionTarget||'').replace(/"/g, '&quot;')}" oninput="updateDiagTarget('${pathStr}', ${idx}, this.value)" style="width:60%;"></div>`;
+                    html += `<div class="diag-npc-label" style="margin-top:4px; color:#f38ba8;">Trigger Special Action:</div><div style="display:flex; gap:5px;"><select class="diag-input" onchange="updateDiagAction('${pathStr}', ${idx}, this.value)" style="width:40%;"><option value="none" ${(!choice.npcAction || choice.npcAction === 'none') ? 'selected' : ''}>None</option><option value="vanish" ${choice.npcAction === 'vanish' ? 'selected' : ''}>Vanish</option><option value="move" ${choice.npcAction === 'move' ? 'selected' : ''}>Move (Room ID)</option><option value="steal" ${choice.npcAction === 'steal' ? 'selected' : ''}>Steal (Item)</option><option value="attack" ${choice.npcAction === 'attack' ? 'selected' : ''}>Attack Player</option><option value="win" ${choice.npcAction === 'win' ? 'selected' : ''}>Win Game</option></select><input class="diag-input" type="text" placeholder="Target (Room ID, Item, or Win Msg)" value="${(choice.actionTarget||'').replace(/"/g, '&quot;')}" oninput="updateDiagTarget('${pathStr}', ${idx}, this.value)" style="width:60%;"></div>`;
                     html += `${buildDialogueHTML(choice.nextNode, childPath)}</div>`;
                 });
             }
@@ -615,7 +634,8 @@
 
         function deleteRoom() {
             if (selectedRoomId && confirm("Delete room?")) {
-                delete rooms[selectedRoomId]; if (victoryConditions.targetRoomId == selectedRoomId) victoryConditions.targetRoomId = 'none';
+                delete rooms[selectedRoomId];
+                for (let v of victoryConditions) { if (v.targetRoomId == selectedRoomId) v.targetRoomId = 'none'; }
                 for (const id in rooms) { for (const dir in rooms[id].exits) { if (rooms[id].exits[dir] == selectedRoomId) delete rooms[id].exits[dir]; } }
                 selectedRoomId = null; cancelNPCEdit(); cancelItemEdit(); updateEditorUI(); drawMap();
             }
@@ -635,10 +655,7 @@
         }
 
         function playRoomMusic(url) {
-            if (currentMusicUrl === url) {
-                if (bgMusic.paused && url) { let p = bgMusic.play(); if (p !== undefined) p.catch(e=>{}); }
-                return; 
-            }
+            if (currentMusicUrl === url) { if (bgMusic.paused && url) { let p = bgMusic.play(); if (p !== undefined) p.catch(e=>{}); } return; }
             currentMusicUrl = url;
             if (!url) { bgMusic.pause(); bgMusic.removeAttribute('src'); bgMusic.load(); return; }
             let cleanUrl = url.replace(/["']/g, ""); bgMusic.src = cleanUrl;
@@ -647,8 +664,7 @@
         }
 
         function getEffectiveDisposition(npc, baseCharisma = null) {
-            let cha = baseCharisma !== null ? baseCharisma : playerStats.charisma;
-            let eff = (npc.friendliness !== undefined ? npc.friendliness : 25) + cha;
+            let cha = baseCharisma !== null ? baseCharisma : playerStats.charisma; let eff = (npc.friendliness !== undefined ? npc.friendliness : 25) + cha;
             if (eff <= 50) return 'Hostile'; if (eff <= 70) return 'Neutral'; return 'Friendly';
         }
 
@@ -656,10 +672,7 @@
             const room = playRooms[playCurrentRoomId]; let hostiles = room.npcs ? room.npcs.filter(n => getEffectiveDisposition(n) === 'Hostile' && !n.isHidden) : [];
             if (hostiles.length > 0) {
                 let spotted = false;
-                for (let npc of hostiles) {
-                    let threshold = getRandomInt(20, 50) - (npc.friendliness !== undefined ? npc.friendliness : 25);
-                    if ((playerStats.stealth || 0) <= threshold) { spotted = true; break; }
-                }
+                for (let npc of hostiles) { let threshold = getRandomInt(20, 50) - (npc.friendliness !== undefined ? npc.friendliness : 25); if ((playerStats.stealth || 0) <= threshold) { spotted = true; break; } }
                 if (!spotted) { isHidden = true; logGame("<em>You slip into the shadows, unnoticed by the enemies.</em>", "#a6adc8"); } 
                 else { isHidden = false; logGame("<strong>You have been spotted!</strong>", "#f38ba8"); enemiesAttack(); }
             } else { isHidden = false; }
@@ -669,80 +682,62 @@
             if (!isHidden) return;
             isHidden = false; logGame("Your actions revealed you from the shadows!", "#bac2de");
             const room = playRooms[playCurrentRoomId];
-            if (!skipAttack && room.npcs && room.npcs.some(n => getEffectiveDisposition(n) === 'Hostile' && !n.isHidden)) { 
-                logGame("The enemies attack!", "#f38ba8"); enemiesAttack(); 
-            }
+            if (!skipAttack && room.npcs && room.npcs.some(n => getEffectiveDisposition(n) === 'Hostile' && !n.isHidden)) { logGame("The enemies attack!", "#f38ba8"); enemiesAttack(); }
         }
 
-        function saveCheckpoint() {
-            checkpointState = JSON.stringify({ stats: playerStats, inv: playerInventory, fx: activeEffects, rooms: playRooms, roomId: playCurrentRoomId });
-            logGame("<em>Checkpoint reached. Game saved.</em>", "#a6e3a1");
-        }
-
+        function saveCheckpoint() { checkpointState = JSON.stringify({ stats: playerStats, inv: playerInventory, fx: activeEffects, rooms: playRooms, roomId: playCurrentRoomId }); logGame("<em>Checkpoint reached. Game saved.</em>", "#a6e3a1"); }
         function loadCheckpoint() {
             if (!checkpointState) { startTest(); return; }
             let state = JSON.parse(checkpointState);
             playerStats = state.stats; playerInventory = state.inv; activeEffects = state.fx; playRooms = state.rooms; playCurrentRoomId = state.roomId;
             gameWon = false; activeDialogue = null; isHidden = false; isLevelingUp = false;
             gameOutput.innerHTML = ''; playerStatusUI.classList.remove('hidden'); updateHUD();
-            logGame("<strong>--- CHECKPOINT LOADED ---</strong>", "#a6e3a1");
-            playRoomMusic(playRooms[playCurrentRoomId].music || "");
+            logGame("<strong>--- CHECKPOINT LOADED ---</strong>", "#a6e3a1"); playRoomMusic(playRooms[playCurrentRoomId].music || "");
             look(); checkStealthOnEntry(); drawMap(); cmdInput.focus();
         }
 
         function triggerStartTest() { updateAliases(); updateVictory(); updatePlayerStats(); startTest(); }
 
         function startTest() {
-            playerStats.hp = playerStats.maxHp; 
-            playerStats.level = 1; playerStats.xp = 0; playerStats.xpNeeded = 10;
-            playerInventory = []; activeEffects = []; gameWon = false; activeDialogue = null; isHidden = false; isLevelingUp = false;
-            checkpointState = null; 
-            
-            playRooms = JSON.parse(JSON.stringify(rooms));
-            gameOutput.innerHTML = '';
+            playerStats.hp = playerStats.maxHp; playerStats.level = 1; playerStats.xp = 0; playerStats.xpNeeded = 10;
+            playerInventory = []; activeEffects = []; gameWon = false; activeDialogue = null; isHidden = false; isLevelingUp = false; checkpointState = null; 
+            playRooms = JSON.parse(JSON.stringify(rooms)); gameOutput.innerHTML = '';
             const roomIds = Object.keys(playRooms);
             if (roomIds.length === 0) { logGame("No rooms exist!", "#f38ba8"); return; }
-            
             playerStatusUI.classList.remove('hidden'); updateHUD();
             playCurrentRoomId = roomIds[0]; 
-            logGame("<strong>--- SYSTEM ONLINE ---</strong>", "#a6e3a1");
-            logGame("<em>Play testing started. Type an action to begin.</em>", "#bac2de");
+            logGame("<strong>--- SYSTEM ONLINE ---</strong>", "#a6e3a1"); logGame("<em>Play testing started. Type an action to begin.</em>", "#bac2de");
             playRoomMusic(playRooms[playCurrentRoomId].music || "");
-            
             if (playRooms[playCurrentRoomId].isCheckpoint) saveCheckpoint();
-            
             look(); checkStealthOnEntry(); drawMap(); cmdInput.focus();
         }
 
         function checkLevelUp() {
             if (playerStats.xp >= playerStats.xpNeeded) {
-                isLevelingUp = true;
-                playerStats.xp -= playerStats.xpNeeded;
-                playerStats.level += 1;
-                playerStats.xpNeeded = Math.floor(playerStats.xpNeeded * 1.1);
-                
+                isLevelingUp = true; playerStats.xp -= playerStats.xpNeeded; playerStats.level += 1; playerStats.xpNeeded = Math.floor(playerStats.xpNeeded * 1.1);
                 logGame(`<br><strong>*** LEVEL UP! You are now Level ${playerStats.level}! ***</strong>`, "#f9e2af");
-                logGame("Choose a stat to increase:", "#cdd6f4");
-                logGame("[1] Max HP (+10)", "#a6e3a1");
-                logGame("[2] Base Damage (+1)", "#a6e3a1");
-                logGame("[3] Wisdom (+1)", "#a6e3a1");
-                logGame("[4] Stealth (+1)", "#a6e3a1");
-                logGame("[5] Charisma (+1)", "#a6e3a1");
-                logGame("<em>(Type a number 1-5 to choose)</em>", "#bac2de");
+                logGame("Choose a stat to increase:", "#cdd6f4"); logGame("[1] Max HP (+10)", "#a6e3a1"); logGame("[2] Base Damage (+1)", "#a6e3a1"); logGame("[3] Wisdom (+1)", "#a6e3a1"); logGame("[4] Stealth (+1)", "#a6e3a1"); logGame("[5] Charisma (+1)", "#a6e3a1"); logGame("<em>(Type a number 1-5 to choose)</em>", "#bac2de");
                 updateHUD();
             }
         }
 
         function checkVictory() {
             if (gameWon || playerStats.hp <= 0) return;
-            if (victoryConditions.targetRoomId !== 'none' && playCurrentRoomId != victoryConditions.targetRoomId) return;
-            for (let reqItem of victoryConditions.requiredItems) { if (!playerInventory.some(i => i.name.toLowerCase() === reqItem.toLowerCase())) return; }
-            for (let reqNpc of victoryConditions.deadNPCs) {
-                let foundAlive = false;
-                for (let rId in playRooms) { if (playRooms[rId].npcs && playRooms[rId].npcs.some(n => n.name.toLowerCase() === reqNpc.toLowerCase())) { foundAlive = true; break; } }
-                if (foundAlive) return;
+            for (let vc of victoryConditions) {
+                let meetsCond = true;
+                if (vc.targetRoomId !== 'none' && playCurrentRoomId != vc.targetRoomId) meetsCond = false;
+                if (meetsCond) { for (let reqItem of vc.requiredItems) { if (!playerInventory.some(i => i.name.toLowerCase() === reqItem.toLowerCase())) { meetsCond = false; break; } } }
+                if (meetsCond) {
+                    for (let reqNpc of vc.deadNPCs) {
+                        let foundAlive = false;
+                        for (let rId in playRooms) { if (playRooms[rId].npcs && playRooms[rId].npcs.some(n => n.name.toLowerCase() === reqNpc.toLowerCase())) { foundAlive = true; break; } }
+                        if (foundAlive) { meetsCond = false; break; }
+                    }
+                }
+                if (meetsCond) {
+                    gameWon = true; logGame(`<br><strong>*** VICTORY ***</strong>`, "#a6e3a1"); logGame(`<strong>${vc.victoryMessage}</strong>`, "#f9e2af"); logGame("<em>Type 'restart' to play again.</em>", "#bac2de"); return;
+                }
             }
-            gameWon = true; logGame(`<br><strong>*** VICTORY ***</strong>`, "#a6e3a1"); logGame(`<strong>${victoryConditions.victoryMessage}</strong>`, "#f9e2af"); logGame("<em>Type 'restart' to play again.</em>", "#bac2de");
         }
 
         function look() {
@@ -752,17 +747,14 @@
             if (room.npcs && room.npcs.length > 0) {
                 let npcLog = "<div style='margin-top: 5px;'>";
                 room.npcs.forEach(npc => {
-                    if (npc.isHidden) return; // Hide invisible NPCs
+                    if (npc.isHidden) return; 
                     let disp = getEffectiveDisposition(npc); let dispColor = disp === 'Hostile' ? '#f38ba8' : (disp === 'Friendly' ? '#a6e3a1' : '#bac2de');
                     npcLog += `> <span style="color:${dispColor}">[${disp}]</span> <strong>${npc.name}</strong> is here. (HP: ${npc.hp}/${npc.maxHp})<br>`;
                 });
                 if (npcLog !== "<div style='margin-top: 5px;'>") { npcLog += "</div>"; logGame(npcLog); }
             }
-            if (room.items && room.items.length > 0) {
-                let itemLog = "<div style='margin-top: 5px; color:#f9e2af;'>"; room.items.forEach(item => { itemLog += `> There is a <strong>${item.name}</strong> here.<br>`; }); itemLog += "</div>"; logGame(itemLog);
-            }
-            let exitsArray = [];
-            for (const dir in room.exits) { if(room.locks && room.locks[dir]) exitsArray.push(`${dir} <span style="color:#f38ba8">(Locked)</span>`); else exitsArray.push(dir); }
+            if (room.items && room.items.length > 0) { let itemLog = "<div style='margin-top: 5px; color:#f9e2af;'>"; room.items.forEach(item => { itemLog += `> There is a <strong>${item.name}</strong> here.<br>`; }); itemLog += "</div>"; logGame(itemLog); }
+            let exitsArray = []; for (const dir in room.exits) { if(room.locks && room.locks[dir]) exitsArray.push(`${dir} <span style="color:#f38ba8">(Locked)</span>`); else exitsArray.push(dir); }
             logGame(`<em>Exits: ${exitsArray.length > 0 ? exitsArray.join(", ") : "None"}</em>`, "#a6adc8");
         }
 
@@ -805,16 +797,12 @@
             if (idx === -1) { logGame(`You don't have a ${itemName} to use.`, "#f38ba8"); return false; }
             if (playerInventory[idx].type === 'equipment') { logGame("You don't need to use that. Its stats apply automatically while in your inventory.", "#bac2de"); return false; }
             const item = playerInventory.splice(idx, 1)[0]; 
-            playerStats.hp += item.hpEffect; if(playerStats.hp > playerStats.maxHp) playerStats.hp = playerStats.maxHp;
-            playerStats.minDmg += item.dmgEffect; playerStats.maxDmg += item.dmgEffect;
+            playerStats.hp += item.hpEffect; if(playerStats.hp > playerStats.maxHp) playerStats.hp = playerStats.maxHp; playerStats.minDmg += item.dmgEffect; playerStats.maxDmg += item.dmgEffect;
             let msg = `You used the ${item.name}.`;
             if (item.hpEffect > 0) msg += ` Restored ${item.hpEffect} HP.`; if (item.hpEffect < 0) msg += ` Lost ${Math.abs(item.hpEffect)} HP.`; if (item.dmgEffect > 0) msg += ` Damage increased by ${item.dmgEffect}!`;
             if (item.duration > 0) { let totalDuration = item.duration + (playerStats.wisdom || 0); activeEffects.push({ name: item.name, hpEffect: item.hpEffect, dmgEffect: item.dmgEffect, duration: totalDuration }); msg += ` (Lasts ${totalDuration} turns)`; }
             logGame(msg, "#a6e3a1"); updateHUD(); 
-            if(playerStats.hp <= 0) { 
-                logGame("<strong>The item killed you.</strong>", "#f38ba8"); 
-                logGame(checkpointState ? "<em>GAME OVER. Type 'restart' to load checkpoint, or 'reset' to start over.</em>" : "<em>GAME OVER. Type 'restart' to try again.</em>", "#f38ba8");
-            }
+            if(playerStats.hp <= 0) { logGame("<strong>The item killed you.</strong>", "#f38ba8"); logGame(checkpointState ? "<em>GAME OVER. Type 'restart' to load checkpoint, or 'reset' to start over.</em>" : "<em>GAME OVER. Type 'restart' to try again.</em>", "#f38ba8"); }
             return true;
         }
 
@@ -833,12 +821,14 @@
         function talkToNPC(targetName) {
             const room = playRooms[playCurrentRoomId]; if(!room.npcs || room.npcs.length === 0) { logGame("There is no one here to talk to.", "#f38ba8"); return false; }
             let targetIndex = -1;
+            if (targetName && targetName.startsWith("to ")) targetName = targetName.substring(3).trim();
             if (!targetName) { 
                 let visibleNpcs = room.npcs.filter(n => !n.isHidden);
                 if (visibleNpcs.length === 1) targetIndex = room.npcs.indexOf(visibleNpcs[0]); 
                 else { logGame("Talk to who?", "#f38ba8"); return false; } 
             } 
             else { targetIndex = room.npcs.findIndex(n => n.name.toLowerCase() === targetName.toLowerCase() && !n.isHidden); if(targetIndex === -1) { logGame(`You don't see ${targetName} here.`, "#f38ba8"); return false; } }
+            
             let npc = room.npcs[targetIndex];
             if (getEffectiveDisposition(npc) === 'Hostile') { logGame(`${npc.name} doesn't want to talk, they want to kill you!`, "#f38ba8"); return false; }
             if (!npc.dialogue || !npc.dialogue.npcText) { logGame(`${npc.name} has nothing to say to you.`, "#bac2de"); return false; }
@@ -857,12 +847,13 @@
         function handleCombat(targetName) {
             const room = playRooms[playCurrentRoomId]; if(!room.npcs || room.npcs.length === 0) { logGame("There is no one here to attack.", "#f38ba8"); return false; }
             let targetIndex = -1;
+            if (targetName && targetName.startsWith("to ")) targetName = targetName.substring(3).trim();
             if (!targetName) { 
                 let visibleNpcs = room.npcs.filter(n => !n.isHidden);
-                if (visibleNpcs.length === 1) targetIndex = room.npcs.indexOf(visibleNpcs[0]); 
-                else { logGame("Who do you want to attack?", "#f38ba8"); return false; } 
+                if (visibleNpcs.length === 1) targetIndex = room.npcs.indexOf(visibleNpcs[0]); else { logGame("Who do you want to attack?", "#f38ba8"); return false; } 
             } 
             else { targetIndex = room.npcs.findIndex(n => n.name.toLowerCase() === targetName.toLowerCase() && !n.isHidden); if(targetIndex === -1) { logGame(`You don't see a ${targetName} here.`, "#f38ba8"); return false; } }
+            
             let npc = room.npcs[targetIndex];
             let currentDisp = getEffectiveDisposition(npc);
             if (currentDisp === 'Neutral') { logGame(`You attacked a neutral entity! ${npc.name} turns hostile!`, "#f38ba8"); npc.friendliness = 0; } 
@@ -877,9 +868,7 @@
                 if (npc.items && npc.items.length > 0) { if (!room.items) room.items = []; npc.items.forEach(it => { room.items.push(it); logGame(`The ${npc.name} dropped a ${it.name}.`, "#f9e2af"); }); }
                 room.npcs.splice(targetIndex, 1); 
             }
-            enemiesAttack(); 
-            if(playerStats.hp > 0) checkLevelUp();
-            return true;
+            enemiesAttack(); if(playerStats.hp > 0) checkLevelUp(); return true;
         }
 
         function enemiesAttack() {
@@ -890,11 +879,7 @@
                     let atkMsg = getRandomMsg(npc.atkMsgs, "The {npc} attacks you!").replace(/{npc}/g, npc.name); logGame(`${atkMsg} (Took ${dmg} damage)`, "#f38ba8");
                 }
             });
-            updateHUD(); 
-            if(playerStats.hp <= 0) { 
-                logGame(`<strong>${getRandomMsg(playerStats.deathMsgs, "You have died.")}</strong>`, "#f38ba8"); 
-                logGame(checkpointState ? "<em>GAME OVER. Type 'restart' to load checkpoint, or 'reset' to start over.</em>" : "<em>GAME OVER. Type 'restart' to try again.</em>", "#f38ba8");
-            }
+            updateHUD(); if(playerStats.hp <= 0) { logGame(`<strong>${getRandomMsg(playerStats.deathMsgs, "You have died.")}</strong>`, "#f38ba8"); logGame(checkpointState ? "<em>GAME OVER. Type 'restart' to load checkpoint, or 'reset' to start over.</em>" : "<em>GAME OVER. Type 'restart' to try again.</em>", "#f38ba8"); }
         }
 
         function getActionPayload(cmd, aliasesArray) {
@@ -940,13 +925,11 @@
                             if (activeDialogue.npc.items) {
                                 let npcItemIdx = activeDialogue.npc.items.findIndex(i => i.name.toLowerCase() === itemName);
                                 if (npcItemIdx !== -1) {
-                                    let givenItem = activeDialogue.npc.items.splice(npcItemIdx, 1)[0];
-                                    playerInventory.push(givenItem);
+                                    let givenItem = activeDialogue.npc.items.splice(npcItemIdx, 1)[0]; playerInventory.push(givenItem);
                                     let giveMsg = `> ${activeDialogue.npc.name} gives you the ${givenItem.name}.`;
                                     if (givenItem.type === 'equipment') {
                                         playerStats.maxHp += givenItem.hpEffect; playerStats.hp += givenItem.hpEffect;
-                                        playerStats.minDmg += givenItem.dmgEffect; playerStats.maxDmg += givenItem.dmgEffect;
-                                        giveMsg += " (Passive stats applied)";
+                                        playerStats.minDmg += givenItem.dmgEffect; playerStats.maxDmg += givenItem.dmgEffect; giveMsg += " (Passive stats applied)";
                                     }
                                     logGame(giveMsg, "#f9e2af");
                                 }
@@ -957,7 +940,13 @@
 
                     if (choice.npcAction && choice.npcAction !== 'none') {
                         let r = playRooms[playCurrentRoomId]; let nIdx = r.npcs.findIndex(n => n === activeDialogue.npc);
-                        if (choice.npcAction === 'vanish') { logGame(`> ${activeDialogue.npc.name} vanishes!`, "#bac2de"); if (nIdx !== -1) r.npcs.splice(nIdx, 1); activeDialogue = null; look(); return; } 
+                        if (choice.npcAction === 'win') {
+                            logGame(`<br><strong>*** VICTORY ***</strong>`, "#a6e3a1"); 
+                            logGame(`<strong>${choice.actionTarget || "You won!"}</strong>`, "#f9e2af"); 
+                            logGame(checkpointState ? "<em>Type 'restart' to load checkpoint, or 'reset' to start over.</em>" : "<em>Type 'restart' to play again.</em>", "#bac2de");
+                            gameWon = true; activeDialogue = null; return;
+                        }
+                        else if (choice.npcAction === 'vanish') { logGame(`> ${activeDialogue.npc.name} vanishes!`, "#bac2de"); if (nIdx !== -1) r.npcs.splice(nIdx, 1); activeDialogue = null; look(); return; } 
                         else if (choice.npcAction === 'move') {
                             let tRoom = choice.actionTarget.trim();
                             if (playRooms[tRoom]) {
@@ -977,12 +966,12 @@
                             } else { logGame(`> ${activeDialogue.npc.name} tries to steal something, but you don't have it!`, "#bac2de"); }
                         }
                     }
+
                     if (choice.nextNode) { activeDialogue.node = choice.nextNode; printDialogueNode(); } else { logGame("<em>(Conversation ends)</em>", "#bac2de"); activeDialogue = null; look(); }
                 } else { logGame("Please type a valid number to reply, or type 'leave'.", "#f38ba8"); }
                 return; 
             }
 
-            // --- NEW: CUSTOM ROOM EVENT INTERCEPT ---
             let currentRoom = playRooms[playCurrentRoomId];
             if (currentRoom.eventCmd) {
                 let triggers = currentRoom.eventCmd.split(',').map(s => s.trim().toLowerCase()).filter(s => s);
@@ -993,24 +982,16 @@
                     if (currentRoom.eventReveal && currentRoom.npcs) {
                         currentRoom.npcs.forEach(n => {
                             if (n.isHidden) {
-                                n.isHidden = false;
-                                logGame(`> ${n.name} is revealed!`, "#f9e2af");
+                                n.isHidden = false; logGame(`> ${n.name} is revealed!`, "#f9e2af");
                                 if (getEffectiveDisposition(n) === 'Hostile') revealedHostile = true;
                             }
                         });
                     }
-                    
                     if (revealedHostile) { breakStealth(true); enemiesAttack(); }
-
                     if (currentRoom.eventMove && playRooms[currentRoom.eventMove]) {
-                        playCurrentRoomId = currentRoom.eventMove;
-                        playRoomMusic(playRooms[playCurrentRoomId].music || "");
-                        if (playRooms[playCurrentRoomId].isCheckpoint) saveCheckpoint();
-                        look(); checkStealthOnEntry(); drawMap();
-                    } else if (!revealedHostile) {
-                        advanceTurn();
-                    }
-                    
+                        playCurrentRoomId = currentRoom.eventMove; playRoomMusic(playRooms[playCurrentRoomId].music || "");
+                        if (playRooms[playCurrentRoomId].isCheckpoint) saveCheckpoint(); look(); checkStealthOnEntry(); drawMap();
+                    } else if (!revealedHostile) { advanceTurn(); }
                     cmdInput.focus(); return; 
                 }
             }
@@ -1043,26 +1024,28 @@
                     if (hasKey) { logGame(`You unlock the door using the ${room.locks[direction]}.`, "#a6e3a1"); delete room.locks[direction]; } 
                     else { logGame(`The way is locked. You need: ${room.locks[direction]}.`, "#f38ba8"); return false; }
                 }
-                playCurrentRoomId = room.exits[direction]; 
-                playRoomMusic(playRooms[playCurrentRoomId].music || "");
-                if (playRooms[playCurrentRoomId].isCheckpoint) saveCheckpoint(); // SAVE ON ENTRY
+                playCurrentRoomId = room.exits[direction]; playRoomMusic(playRooms[playCurrentRoomId].music || "");
+                if (playRooms[playCurrentRoomId].isCheckpoint) saveCheckpoint(); 
                 look(); checkStealthOnEntry(); drawMap(); return true; 
             } else { logGame("You can't go that way.", "#f38ba8"); return false; }
         }
 
         async function exportGame() {
+            updateAliases(); updateVictory(); updatePlayerStats();
             const roomIds = Object.keys(rooms);
             if (roomIds.length === 0) { alert("Build a room first!"); return; }
 
             const rawName = document.getElementById('game-name-input').value.trim() || "My Game";
-            const safeName = rawName.replace(/[^a-z0-9_-]/gi, '_'); // Makes string safe for file naming
+            const safeName = rawName.replace(/[^a-z0-9_-]/gi, '_'); 
             const gameMetaString = JSON.stringify({ name: rawName, version: gameVersion });
 
             const gameDataString = JSON.stringify(rooms); const aliasesString = JSON.stringify(aliases);
             const playerStatsString = JSON.stringify(playerStats); const victoryConditionsString = JSON.stringify(victoryConditions);
 
+            const scriptStart = "<scr" + "ipt>"; const scriptEnd = "</scr" + "ipt>";
+
             const standaloneHTML = `<!DOCTYPE html>
-<html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>${rawName}</title>
+<html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>` + rawName + `</title>
 <style>
     body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; margin: 0; background-color: #1e1e2e; color: #cdd6f4; display: flex; justify-content: center; align-items: center; height: 100vh; }
     #player-panel { width: 100%; max-width: 700px; height: 85vh; background-color: #181825; border: 2px solid #313244; display: flex; flex-direction: column; padding: 20px; box-sizing: border-box; border-radius: 8px; box-shadow: 0 10px 30px rgba(0,0,0,0.5); }
@@ -1076,19 +1059,19 @@
 </style></head><body>
 <audio id="bg-music" loop style="display:none;"></audio>
 <div id="player-panel">
-    <h2 style="margin: 0; text-align: center; color: #89b4fa;">${rawName}</h2>
+    <h2 style="margin: 0; text-align: center; color: #89b4fa;">` + rawName + `</h2>
     <div id="player-status"><span id="ui-lvl" style="color:#cba6f7;">Lvl: 1 (0/10 XP)</span><span id="ui-hp">HP: 100/100</span><span id="ui-dmg">Dmg: 5-15</span></div>
     <div id="game-output"></div>
     <div id="parser-ui"><input type="text" id="cmd-input" placeholder="Action..." autocomplete="off" onkeydown="if(event.key === 'Enter') parseCommand()"><button onclick="parseCommand()">Send</button></div>
 </div>
-<script>
-    let playRooms = ${gameDataString}; const aliases = ${aliasesString}; let playerStats = ${playerStatsString}; let victoryConditions = ${victoryConditionsString};
-    let gameMeta = ${gameMetaString};
+` + scriptStart + `
+    const initialRooms = ` + gameDataString + `; let playRooms = {};
+    const aliases = ` + aliasesString + `; let playerStats = ` + playerStatsString + `; 
+    let victoryConditions = ` + victoryConditionsString + `; let gameMeta = ` + gameMetaString + `;
     
     playerStats.level = 1; playerStats.xp = 0; playerStats.xpNeeded = 10;
-    let playerInventory = []; let activeEffects = []; let gameWon = false; let activeDialogue = null; let isHidden = false; let isLevelingUp = false;
-    let checkpointState = null;
-    let playCurrentRoomId = Object.keys(playRooms)[0];
+    let playerInventory = []; let activeEffects = []; let gameWon = false; let activeDialogue = null; let isHidden = false; let isLevelingUp = false; let checkpointState = null;
+    let playCurrentRoomId = Object.keys(initialRooms)[0];
     const bgMusic = document.getElementById('bg-music'); let currentMusicUrl = "";
     
     const gameOutput = document.getElementById('game-output'); const cmdInput = document.getElementById('cmd-input'); 
@@ -1096,21 +1079,9 @@
 
     function logGame(text, color="#cdd6f4") { const p = document.createElement('div'); p.style.color = color; p.style.marginBottom = "15px"; p.innerHTML = text; gameOutput.appendChild(p); gameOutput.scrollTop = gameOutput.scrollHeight; }
     function updateHUD() { uiLvl.innerText = 'Lvl: ' + playerStats.level + ' (' + playerStats.xp + '/' + playerStats.xpNeeded + ' XP)'; uiHp.innerText = 'HP: ' + playerStats.hp + '/' + playerStats.maxHp; uiHp.style.color = playerStats.hp <= 0 ? "#f38ba8" : "#f9e2af"; uiDmg.innerText = 'Dmg: ' + playerStats.minDmg + '-' + playerStats.maxDmg; }
-
-    function playRoomMusic(url) {
-        if (currentMusicUrl === url) { if (bgMusic.paused && url) { let p = bgMusic.play(); if (p !== undefined) p.catch(e=>{}); } return; }
-        currentMusicUrl = url;
-        if (!url) { bgMusic.pause(); bgMusic.removeAttribute('src'); bgMusic.load(); return; }
-        let cleanUrl = url.replace(/["']/g, ""); bgMusic.src = cleanUrl;
-        let playPromise = bgMusic.play();
-        if (playPromise !== undefined) { playPromise.catch(e => { if (e.name !== 'AbortError') { logGame('<em>System: Cannot play music. Check file path. (' + e.message + ')</em>', "#f38ba8"); } }); }
-    }
-
-    function getEffectiveDisposition(npc, baseCharisma = null) {
-        let cha = baseCharisma !== null ? baseCharisma : playerStats.charisma; let eff = (npc.friendliness !== undefined ? npc.friendliness : 25) + cha;
-        if (eff <= 50) return 'Hostile'; if (eff <= 70) return 'Neutral'; return 'Friendly';
-    }
-
+    function playRoomMusic(url) { if (currentMusicUrl === url) { if (bgMusic.paused && url) { let p = bgMusic.play(); if (p !== undefined) p.catch(e=>{}); } return; } currentMusicUrl = url; if (!url) { bgMusic.pause(); bgMusic.removeAttribute('src'); bgMusic.load(); return; } let cleanUrl = url.replace(/["']/g, ""); bgMusic.src = cleanUrl; let playPromise = bgMusic.play(); if (playPromise !== undefined) { playPromise.catch(e => { if (e.name !== 'AbortError') { logGame('<em>System: Cannot play music. Check file path. (' + e.message + ')</em>', "#f38ba8"); } }); } }
+    function getEffectiveDisposition(npc, baseCharisma = null) { let cha = baseCharisma !== null ? baseCharisma : playerStats.charisma; let eff = (npc.friendliness !== undefined ? npc.friendliness : 25) + cha; if (eff <= 50) return 'Hostile'; if (eff <= 70) return 'Neutral'; return 'Friendly'; }
+    
     function checkStealthOnEntry() {
         const room = playRooms[playCurrentRoomId]; let hostiles = room.npcs ? room.npcs.filter(n => getEffectiveDisposition(n) === 'Hostile' && !n.isHidden) : [];
         if (hostiles.length > 0) {
@@ -1128,37 +1099,21 @@
         if (!skipAttack && room.npcs && room.npcs.some(n => getEffectiveDisposition(n) === 'Hostile' && !n.isHidden)) { logGame("The enemies attack!", "#f38ba8"); enemiesAttack(); }
     }
 
-    function saveCheckpoint() {
-        checkpointState = JSON.stringify({ stats: playerStats, inv: playerInventory, fx: activeEffects, rooms: playRooms, roomId: playCurrentRoomId });
-        logGame("<em>Checkpoint reached. Game saved.</em>", "#a6e3a1");
-    }
-
+    function saveCheckpoint() { checkpointState = JSON.stringify({ stats: playerStats, inv: playerInventory, fx: activeEffects, rooms: playRooms, roomId: playCurrentRoomId }); logGame("<em>Checkpoint reached. Game saved.</em>", "#a6e3a1"); }
     function loadCheckpoint() {
         if (!checkpointState) { startTest(); return; }
-        let state = JSON.parse(checkpointState);
-        playerStats = state.stats; playerInventory = state.inv; activeEffects = state.fx; playRooms = state.rooms; playCurrentRoomId = state.roomId;
-        gameWon = false; activeDialogue = null; isHidden = false; isLevelingUp = false;
-        gameOutput.innerHTML = ''; updateHUD();
-        logGame("<strong>--- CHECKPOINT LOADED ---</strong>", "#a6e3a1");
-        playRoomMusic(playRooms[playCurrentRoomId].music || "");
-        look(); checkStealthOnEntry(); cmdInput.focus();
+        let state = JSON.parse(checkpointState); playerStats = state.stats; playerInventory = state.inv; activeEffects = state.fx; playRooms = state.rooms; playCurrentRoomId = state.roomId;
+        gameWon = false; activeDialogue = null; isHidden = false; isLevelingUp = false; gameOutput.innerHTML = ''; updateHUD();
+        logGame("<strong>--- CHECKPOINT LOADED ---</strong>", "#a6e3a1"); playRoomMusic(playRooms[playCurrentRoomId].music || ""); look(); checkStealthOnEntry(); cmdInput.focus();
     }
 
     function startTest() {
-        playerStats.hp = playerStats.maxHp; 
-        playerStats.level = 1; playerStats.xp = 0; playerStats.xpNeeded = 10;
-        playerInventory = []; activeEffects = []; gameWon = false; activeDialogue = null; isHidden = false; isLevelingUp = false;
-        checkpointState = null; 
-        
-        playRooms = JSON.parse(JSON.stringify(${gameDataString}));
-        gameOutput.innerHTML = '';
-        
-        updateHUD();
+        playerStats.hp = playerStats.maxHp; playerStats.level = 1; playerStats.xp = 0; playerStats.xpNeeded = 10;
+        playerInventory = []; activeEffects = []; gameWon = false; activeDialogue = null; isHidden = false; isLevelingUp = false; checkpointState = null; 
+        playRooms = JSON.parse(JSON.stringify(initialRooms)); gameOutput.innerHTML = ''; updateHUD();
         playCurrentRoomId = Object.keys(playRooms)[0]; 
-        logGame("<strong>--- SYSTEM ONLINE ---</strong>", "#a6e3a1");
-        logGame("<em>Play testing started. Type an action to begin.</em>", "#bac2de");
-        playRoomMusic(playRooms[playCurrentRoomId].music || "");
-        if (playRooms[playCurrentRoomId].isCheckpoint) saveCheckpoint();
+        logGame("<strong>--- SYSTEM ONLINE ---</strong>", "#a6e3a1"); logGame("<em>Play testing started. Type an action to begin.</em>", "#bac2de");
+        playRoomMusic(playRooms[playCurrentRoomId].music || ""); if (playRooms[playCurrentRoomId].isCheckpoint) saveCheckpoint();
         look(); checkStealthOnEntry(); cmdInput.focus();
     }
 
@@ -1166,27 +1121,31 @@
         if (playerStats.xp >= playerStats.xpNeeded) {
             isLevelingUp = true; playerStats.xp -= playerStats.xpNeeded; playerStats.level += 1; playerStats.xpNeeded = Math.floor(playerStats.xpNeeded * 1.1);
             logGame('<br><strong>*** LEVEL UP! You are now Level ' + playerStats.level + '! ***</strong>', "#f9e2af");
-            logGame("Choose a stat to increase:", "#cdd6f4"); logGame("[1] Max HP (+10)", "#a6e3a1"); logGame("[2] Base Damage (+1)", "#a6e3a1");
-            logGame("[3] Wisdom (+1)", "#a6e3a1"); logGame("[4] Stealth (+1)", "#a6e3a1"); logGame("[5] Charisma (+1)", "#a6e3a1");
-            logGame("<em>(Type a number 1-5 to choose)</em>", "#bac2de"); updateHUD();
+            logGame("Choose a stat to increase:", "#cdd6f4"); logGame("[1] Max HP (+10)", "#a6e3a1"); logGame("[2] Base Damage (+1)", "#a6e3a1"); logGame("[3] Wisdom (+1)", "#a6e3a1"); logGame("[4] Stealth (+1)", "#a6e3a1"); logGame("[5] Charisma (+1)", "#a6e3a1"); logGame("<em>(Type a number 1-5 to choose)</em>", "#bac2de"); updateHUD();
         }
     }
 
     function checkVictory() {
         if (gameWon || playerStats.hp <= 0) return;
-        if (victoryConditions.targetRoomId !== 'none' && playCurrentRoomId != victoryConditions.targetRoomId) return;
-        for (let reqItem of victoryConditions.requiredItems) { if (!playerInventory.some(i => i.name.toLowerCase() === reqItem.toLowerCase())) return; }
-        for (let reqNpc of victoryConditions.deadNPCs) {
-            let foundAlive = false;
-            for (let rId in playRooms) { if (playRooms[rId].npcs && playRooms[rId].npcs.some(n => n.name.toLowerCase() === reqNpc.toLowerCase())) { foundAlive = true; break; } }
-            if (foundAlive) return;
+        for (let vc of victoryConditions) {
+            let meetsCond = true;
+            if (vc.targetRoomId !== 'none' && playCurrentRoomId != vc.targetRoomId) meetsCond = false;
+            if (meetsCond) { for (let reqItem of vc.requiredItems) { if (!playerInventory.some(i => i.name.toLowerCase() === reqItem.toLowerCase())) { meetsCond = false; break; } } }
+            if (meetsCond) {
+                for (let reqNpc of vc.deadNPCs) {
+                    let foundAlive = false;
+                    for (let rId in playRooms) { if (playRooms[rId].npcs && playRooms[rId].npcs.some(n => n.name.toLowerCase() === reqNpc.toLowerCase())) { foundAlive = true; break; } }
+                    if (foundAlive) { meetsCond = false; break; }
+                }
+            }
+            if (meetsCond) {
+                gameWon = true; logGame('<br><strong>*** VICTORY ***</strong>', "#a6e3a1"); logGame('<strong>' + vc.victoryMessage + '</strong>', "#f9e2af"); logGame("<em>Type 'restart' to play again.</em>", "#bac2de"); return;
+            }
         }
-        gameWon = true; logGame('<br><strong>*** VICTORY ***</strong>', "#a6e3a1"); logGame('<strong>' + victoryConditions.victoryMessage + '</strong>', "#f9e2af"); logGame("<em>Refresh page to play again.</em>", "#bac2de");
     }
 
     function look() {
-        const room = playRooms[playCurrentRoomId]; 
-        let imgHTML = room.image ? '<img src="' + room.image.replace(/["']/g, "") + '" class="room-image"><br>' : '';
+        const room = playRooms[playCurrentRoomId]; let imgHTML = room.image ? '<img src="' + room.image.replace(/["']/g, "") + '" class="room-image"><br>' : '';
         logGame('<strong>[ ' + room.name + ' ]</strong><br>' + imgHTML + room.description);
         if (room.npcs && room.npcs.length > 0) {
             let npcLog = "<div style='margin-top: 5px;'>";
@@ -1197,11 +1156,8 @@
             });
             if (npcLog !== "<div style='margin-top: 5px;'>") { npcLog += "</div>"; logGame(npcLog); }
         }
-        if (room.items && room.items.length > 0) {
-            let itemLog = "<div style='margin-top: 5px; color:#f9e2af;'>"; room.items.forEach(item => { itemLog += '> There is a <strong>' + item.name + '</strong> here.<br>'; }); itemLog += "</div>"; logGame(itemLog);
-        }
-        let exitsArray = [];
-        for (const dir in room.exits) { if(room.locks && room.locks[dir]) exitsArray.push(dir + ' <span style="color:#f38ba8">(Locked)</span>'); else exitsArray.push(dir); }
+        if (room.items && room.items.length > 0) { let itemLog = "<div style='margin-top: 5px; color:#f9e2af;'>"; room.items.forEach(item => { itemLog += '> There is a <strong>' + item.name + '</strong> here.<br>'; }); itemLog += "</div>"; logGame(itemLog); }
+        let exitsArray = []; for (const dir in room.exits) { if(room.locks && room.locks[dir]) exitsArray.push(dir + ' <span style="color:#f38ba8">(Locked)</span>'); else exitsArray.push(dir); }
         logGame('<em>Exits: ' + (exitsArray.length > 0 ? exitsArray.join(", ") : "None") + '</em>', "#a6adc8");
     }
 
@@ -1250,10 +1206,7 @@
         if (item.hpEffect > 0) msg += " Restored " + item.hpEffect + " HP."; if (item.hpEffect < 0) msg += " Lost " + Math.abs(item.hpEffect) + " HP."; if (item.dmgEffect > 0) msg += " Damage increased by " + item.dmgEffect + "!";
         if (item.duration > 0) { let totalDuration = item.duration + (playerStats.wisdom || 0); activeEffects.push({ name: item.name, hpEffect: item.hpEffect, dmgEffect: item.dmgEffect, duration: totalDuration }); msg += " (Lasts " + totalDuration + " turns)"; }
         logGame(msg, "#a6e3a1"); updateHUD(); 
-        if(playerStats.hp <= 0) { 
-            logGame("<strong>The item killed you.</strong>", "#f38ba8"); 
-            logGame(checkpointState ? "<em>GAME OVER. Type 'restart' to load checkpoint, or 'reset' to start over.</em>" : "<em>GAME OVER. Type 'restart' to try again.</em>", "#f38ba8");
-        }
+        if(playerStats.hp <= 0) { logGame("<strong>The item killed you.</strong>", "#f38ba8"); logGame(checkpointState ? "<em>GAME OVER. Type 'restart' to load checkpoint, or 'reset' to start over.</em>" : "<em>GAME OVER. Type 'restart' to try again.</em>", "#f38ba8"); }
         return true;
     }
 
@@ -1272,12 +1225,14 @@
     function talkToNPC(targetName) {
         const room = playRooms[playCurrentRoomId]; if(!room.npcs || room.npcs.length === 0) { logGame("There is no one here to talk to.", "#f38ba8"); return false; }
         let targetIndex = -1;
+        if (targetName && targetName.startsWith("to ")) targetName = targetName.substring(3).trim();
         if (!targetName) { 
             let visibleNpcs = room.npcs.filter(n => !n.isHidden);
             if (visibleNpcs.length === 1) targetIndex = room.npcs.indexOf(visibleNpcs[0]); 
             else { logGame("Talk to who?", "#f38ba8"); return false; } 
         } 
         else { targetIndex = room.npcs.findIndex(n => n.name.toLowerCase() === targetName.toLowerCase() && !n.isHidden); if(targetIndex === -1) { logGame("You don't see " + targetName + " here.", "#f38ba8"); return false; } }
+        
         let npc = room.npcs[targetIndex];
         if (getEffectiveDisposition(npc) === 'Hostile') { logGame(npc.name + " doesn't want to talk, they want to kill you!", "#f38ba8"); return false; }
         if (!npc.dialogue || !npc.dialogue.npcText) { logGame(npc.name + " has nothing to say to you.", "#bac2de"); return false; }
@@ -1294,21 +1249,20 @@
     function getRandomMsg(arr, defaultMsg) { return (!arr || arr.length === 0 || arr[0] === "") ? defaultMsg : arr[Math.floor(Math.random() * arr.length)]; }
 
     function handleCombat(targetName) {
-        const room = playRooms[playCurrentRoomId];
-        if(!room.npcs || room.npcs.length === 0) { logGame("There is no one here to attack.", "#f38ba8"); return false; }
+        const room = playRooms[playCurrentRoomId]; if(!room.npcs || room.npcs.length === 0) { logGame("There is no one here to attack.", "#f38ba8"); return false; }
         let targetIndex = -1;
-        if (!targetName) {
+        if (targetName && targetName.startsWith("to ")) targetName = targetName.substring(3).trim();
+        if (!targetName) { 
             let visibleNpcs = room.npcs.filter(n => !n.isHidden);
-            if (visibleNpcs.length === 1) targetIndex = room.npcs.indexOf(visibleNpcs[0]); 
-            else { logGame("Who do you want to attack?", "#f38ba8"); return false; }
-        } else {
-            targetIndex = room.npcs.findIndex(n => n.name.toLowerCase() === targetName.toLowerCase() && !n.isHidden);
-            if(targetIndex === -1) { logGame("You don't see a " + targetName + " here.", "#f38ba8"); return false; }
-        }
+            if (visibleNpcs.length === 1) targetIndex = room.npcs.indexOf(visibleNpcs[0]); else { logGame("Who do you want to attack?", "#f38ba8"); return false; } 
+        } 
+        else { targetIndex = room.npcs.findIndex(n => n.name.toLowerCase() === targetName.toLowerCase() && !n.isHidden); if(targetIndex === -1) { logGame("You don't see a " + targetName + " here.", "#f38ba8"); return false; } }
+        
         let npc = room.npcs[targetIndex];
         let currentDisp = getEffectiveDisposition(npc);
         if (currentDisp === 'Neutral') { logGame("You attacked a neutral entity! " + npc.name + " turns hostile!", "#f38ba8"); npc.friendliness = 0; } 
         else if (currentDisp === 'Friendly') { logGame("You attack " + npc.name + ", but they refuse to fight back.", "#bac2de"); }
+
         let dmg = getRandomInt(playerStats.minDmg, playerStats.maxDmg); npc.hp -= dmg;
         let atkMsg = getRandomMsg(playerStats.atkMsgs, "You hit the {target}!").replace(/{target}/g, npc.name); logGame(atkMsg + " (Dealt " + dmg + " damage)", "#a6e3a1");
         
@@ -1316,11 +1270,9 @@
             let xpGain = getRandomInt(npc.minXp !== undefined ? npc.minXp : 2, npc.maxXp !== undefined ? npc.maxXp : 5); playerStats.xp += xpGain;
             let deathMsg = getRandomMsg(npc.deathMsgs, "The {npc} dies.").replace(/{npc}/g, npc.name); logGame(deathMsg + " (Gained " + xpGain + " XP)", "#f9e2af"); 
             if (npc.items && npc.items.length > 0) { if (!room.items) room.items = []; npc.items.forEach(it => { room.items.push(it); logGame("The " + npc.name + " dropped a " + it.name + ".", "#f9e2af"); }); }
-            room.npcs.splice(targetIndex, 1);
+            room.npcs.splice(targetIndex, 1); 
         }
-        enemiesAttack(); 
-        if(playerStats.hp > 0) checkLevelUp();
-        return true;
+        enemiesAttack(); if(playerStats.hp > 0) checkLevelUp(); return true;
     }
 
     function enemiesAttack() {
@@ -1331,11 +1283,7 @@
                 let atkMsg = getRandomMsg(npc.atkMsgs, "The {npc} attacks you!").replace(/{npc}/g, npc.name); logGame(atkMsg + " (Took " + dmg + " damage)", "#f38ba8");
             }
         });
-        updateHUD(); 
-        if(playerStats.hp <= 0) { 
-            logGame('<strong>' + getRandomMsg(playerStats.deathMsgs, "You died.") + '</strong>', "#f38ba8"); 
-            logGame(checkpointState ? "<em>GAME OVER. Type 'restart' to load checkpoint, or 'reset' to start over.</em>" : "<em>GAME OVER. Type 'restart' to try again.</em>", "#f38ba8");
-        }
+        updateHUD(); if(playerStats.hp <= 0) { logGame('<strong>' + getRandomMsg(playerStats.deathMsgs, "You died.") + '</strong>', "#f38ba8"); logGame(checkpointState ? "<em>GAME OVER. Type 'restart' to load checkpoint, or 'reset' to start over.</em>" : "<em>GAME OVER. Type 'restart' to try again.</em>", "#f38ba8"); }
     }
 
     function getActionPayload(cmd, aliasesArray) {
@@ -1345,9 +1293,9 @@
     }
 
     function parseCommand() {
-        if (currentMusicUrl && bgMusic.paused) { let p = bgMusic.play(); if(p!==undefined) p.catch(e=>{}); }
+        if (currentMusicUrl && bgMusic.paused) { let p = bgMusic.play(); if (p !== undefined) p.catch(e=>{}); }
         const rawCmd = cmdInput.value.trim(); if (!rawCmd) return; cmdInput.value = ''; const cmd = rawCmd.toLowerCase(); logGame('> <strong>' + rawCmd + '</strong>', "#cdd6f4");
-        
+
         if (cmd === 'reset') { startTest(); return; }
         if (cmd === 'restart') { checkpointState ? loadCheckpoint() : startTest(); return; }
 
@@ -1381,13 +1329,11 @@
                         if (activeDialogue.npc.items) {
                             let npcItemIdx = activeDialogue.npc.items.findIndex(i => i.name.toLowerCase() === itemName);
                             if (npcItemIdx !== -1) {
-                                let givenItem = activeDialogue.npc.items.splice(npcItemIdx, 1)[0];
-                                playerInventory.push(givenItem);
+                                let givenItem = activeDialogue.npc.items.splice(npcItemIdx, 1)[0]; playerInventory.push(givenItem);
                                 let giveMsg = '> ' + activeDialogue.npc.name + ' gives you the ' + givenItem.name + '.';
                                 if (givenItem.type === 'equipment') {
                                     playerStats.maxHp += givenItem.hpEffect; playerStats.hp += givenItem.hpEffect;
-                                    playerStats.minDmg += givenItem.dmgEffect; playerStats.maxDmg += givenItem.dmgEffect;
-                                    giveMsg += " (Passive stats applied)";
+                                    playerStats.minDmg += givenItem.dmgEffect; playerStats.maxDmg += givenItem.dmgEffect; giveMsg += " (Passive stats applied)";
                                 }
                                 logGame(giveMsg, "#f9e2af");
                             }
@@ -1398,42 +1344,30 @@
 
                 if (choice.npcAction && choice.npcAction !== 'none') {
                     let r = playRooms[playCurrentRoomId]; let nIdx = r.npcs.findIndex(n => n === activeDialogue.npc);
-                    if (choice.npcAction === 'vanish') {
-                        logGame('> ' + activeDialogue.npc.name + ' vanishes!', "#bac2de");
-                        if (nIdx !== -1) r.npcs.splice(nIdx, 1);
-                        activeDialogue = null; look(); return;
-                    } 
+                    if (choice.npcAction === 'win') {
+                        logGame('<br><strong>*** VICTORY ***</strong>', "#a6e3a1"); 
+                        logGame('<strong>' + (choice.actionTarget || "You won!") + '</strong>', "#f9e2af"); 
+                        logGame(checkpointState ? "<em>Type 'restart' to load checkpoint, or 'reset' to start over.</em>" : "<em>Type 'restart' to play again.</em>", "#bac2de");
+                        gameWon = true; activeDialogue = null; return;
+                    }
+                    else if (choice.npcAction === 'vanish') { logGame('> ' + activeDialogue.npc.name + ' vanishes!', "#bac2de"); if (nIdx !== -1) r.npcs.splice(nIdx, 1); activeDialogue = null; look(); return; } 
                     else if (choice.npcAction === 'move') {
                         let tRoom = choice.actionTarget.trim();
                         if (playRooms[tRoom]) {
                             logGame('> ' + activeDialogue.npc.name + ' leaves.', "#bac2de");
-                            if (nIdx !== -1) {
-                                let movingNpc = r.npcs.splice(nIdx, 1)[0];
-                                if (!playRooms[tRoom].npcs) playRooms[tRoom].npcs = [];
-                                playRooms[tRoom].npcs.push(movingNpc);
-                            }
-                        } else { logGame('> ' + activeDialogue.npc.name + ' tries to leave, but the destination doesn\\'t exist!', "#bac2de"); }
+                            if (nIdx !== -1) { let movingNpc = r.npcs.splice(nIdx, 1)[0]; if (!playRooms[tRoom].npcs) playRooms[tRoom].npcs = []; playRooms[tRoom].npcs.push(movingNpc); }
+                        } else { logGame('> ' + activeDialogue.npc.name + ' tries to leave, but the destination doesn't exist!', "#bac2de"); }
                         activeDialogue = null; look(); return;
                     } 
-                    else if (choice.npcAction === 'attack') {
-                        logGame('> ' + activeDialogue.npc.name + ' suddenly attacks!', "#f38ba8");
-                        activeDialogue.npc.friendliness = 0; activeDialogue = null; enemiesAttack(); return;
-                    } 
+                    else if (choice.npcAction === 'attack') { logGame('> ' + activeDialogue.npc.name + ' suddenly attacks!', "#f38ba8"); activeDialogue.npc.friendliness = 0; activeDialogue = null; enemiesAttack(); return; } 
                     else if (choice.npcAction === 'steal') {
-                        let itemName = choice.actionTarget.trim().toLowerCase();
-                        let pIdx = playerInventory.findIndex(i => i.name.toLowerCase() === itemName);
+                        let itemName = choice.actionTarget.trim().toLowerCase(); let pIdx = playerInventory.findIndex(i => i.name.toLowerCase() === itemName);
                         if (pIdx !== -1) {
-                            let stolen = playerInventory.splice(pIdx, 1)[0];
-                            if (!activeDialogue.npc.items) activeDialogue.npc.items = [];
-                            activeDialogue.npc.items.push(stolen);
+                            let stolen = playerInventory.splice(pIdx, 1)[0]; if (!activeDialogue.npc.items) activeDialogue.npc.items = []; activeDialogue.npc.items.push(stolen);
                             logGame('> ' + activeDialogue.npc.name + ' steals your ' + stolen.name + '!', "#f38ba8");
-                            if (stolen.type === 'equipment') {
-                                playerStats.maxHp -= stolen.hpEffect; playerStats.hp -= stolen.hpEffect;
-                                playerStats.minDmg -= stolen.dmgEffect; playerStats.maxDmg -= stolen.dmgEffect;
-                                if (playerStats.hp <= 0) playerStats.hp = 1;
-                            }
+                            if (stolen.type === 'equipment') { playerStats.maxHp -= stolen.hpEffect; playerStats.hp -= stolen.hpEffect; playerStats.minDmg -= stolen.dmgEffect; playerStats.maxDmg -= stolen.dmgEffect; if (playerStats.hp <= 0) playerStats.hp = 1; }
                             updateHUD();
-                        } else { logGame('> ' + activeDialogue.npc.name + ' tries to steal something, but you don\\'t have it!', "#bac2de"); }
+                        } else { logGame('> ' + activeDialogue.npc.name + ' tries to steal something, but you don't have it!', "#bac2de"); }
                     }
                 }
 
@@ -1452,24 +1386,17 @@
                 if (currentRoom.eventReveal && currentRoom.npcs) {
                     currentRoom.npcs.forEach(n => {
                         if (n.isHidden) {
-                            n.isHidden = false;
-                            logGame('> ' + n.name + ' is revealed!', "#f9e2af");
+                            n.isHidden = false; logGame('> ' + n.name + ' is revealed!', "#f9e2af");
                             if (getEffectiveDisposition(n) === 'Hostile') revealedHostile = true;
                         }
                     });
                 }
                 
                 if (revealedHostile) { breakStealth(true); enemiesAttack(); }
-
                 if (currentRoom.eventMove && playRooms[currentRoom.eventMove]) {
-                    playCurrentRoomId = currentRoom.eventMove;
-                    playRoomMusic(playRooms[playCurrentRoomId].music || "");
-                    if (playRooms[playCurrentRoomId].isCheckpoint) saveCheckpoint();
-                    look(); checkStealthOnEntry(); 
-                } else if (!revealedHostile) {
-                    advanceTurn();
-                }
-                
+                    playCurrentRoomId = currentRoom.eventMove; playRoomMusic(playRooms[playCurrentRoomId].music || "");
+                    if (playRooms[playCurrentRoomId].isCheckpoint) saveCheckpoint(); look(); checkStealthOnEntry(); 
+                } else if (!revealedHostile) { advanceTurn(); }
                 cmdInput.focus(); return; 
             }
         }
@@ -1502,43 +1429,38 @@
                 if (hasKey) { logGame("You unlock the door using the " + room.locks[direction] + ".", "#a6e3a1"); delete room.locks[direction]; } 
                 else { logGame("The way is locked. You need: " + room.locks[direction] + ".", "#f38ba8"); return false; }
             }
-            playCurrentRoomId = room.exits[direction]; 
-            playRoomMusic(playRooms[playCurrentRoomId].music || "");
+            playCurrentRoomId = room.exits[direction]; playRoomMusic(playRooms[playCurrentRoomId].music || "");
             if (playRooms[playCurrentRoomId].isCheckpoint) saveCheckpoint(); 
             look(); checkStealthOnEntry(); return true; 
         } else { logGame("You can't go that way.", "#f38ba8"); return false; }
     }
     
-    // Auto-Start Exported Game
     startTest();
-<\/script>
+` + scriptEnd + `
 </body></html>`;
 
             try {
                 if (window.showSaveFilePicker) {
                     if (!currentFileHandle) {
                         currentFileHandle = await window.showSaveFilePicker({
-                            suggestedName: `${safeName}.html`,
+                            suggestedName: safeName + '.html',
                             types: [{ description: 'HTML Game File', accept: {'text/html': ['.html']} }],
                         });
                     }
                     const writable = await currentFileHandle.createWritable();
                     await writable.write(standaloneHTML);
                     await writable.close();
-                    
                     logGame(`<em>Saved to designated file: ${currentFileHandle.name} (Version ${gameVersion})</em>`, "#a6e3a1");
 
                     if (gameVersion > 0 && gameVersion % 5 === 0) {
                         const blob = new Blob([standaloneHTML], { type: 'text/html' });
-                        const url = URL.createObjectURL(blob);
-                        const a = document.createElement('a'); a.href = url; a.download = `${safeName}_backup_v${gameVersion}.html`;
+                        const url = URL.createObjectURL(blob); const a = document.createElement('a'); a.href = url; a.download = safeName + '_backup_v' + gameVersion + '.html';
                         document.body.appendChild(a); a.click(); document.body.removeChild(a); URL.revokeObjectURL(url);
                         logGame(`<em>Milestone backup (_v${gameVersion}) saved to your Downloads folder!</em>`, "#f9e2af");
                     }
                 } else {
                     const blob = new Blob([standaloneHTML], { type: 'text/html' });
-                    const url = URL.createObjectURL(blob);
-                    const a = document.createElement('a'); a.href = url; a.download = `${safeName}_v${gameVersion}.html`;
+                    const url = URL.createObjectURL(blob); const a = document.createElement('a'); a.href = url; a.download = safeName + '_v' + gameVersion + '.html';
                     document.body.appendChild(a); a.click(); document.body.removeChild(a); URL.revokeObjectURL(url);
                 }
                 gameVersion++;
@@ -1547,23 +1469,31 @@
             }
         }
         
-        // --- IMPORT LOGIC ---
         function importGame(event) {
             const file = event.target.files[0];
             if (!file) return;
-
             const reader = new FileReader();
             reader.onload = function(e) {
                 const content = e.target.result;
                 try {
-                    const match = content.match(/let playRooms = (\{.*?\}); const aliases = (\{.*?\}); let playerStats = (\{.*?\}); let victoryConditions = (\{.*?\});/s);
+                    const match = content.match(/const initialRooms = (\{.*?\});/s) || content.match(/let playRooms = (\{.*?\});/s);
                     const metaMatch = content.match(/let gameMeta = (\{.*?\});/);
+                    const aliasesMatch = content.match(/const aliases = (\{.*?\});/);
+                    const statsMatch = content.match(/let playerStats = (\{.*?\});/);
+                    const vicMatch = content.match(/let victoryConditions = (\[.*?\]);/s) || content.match(/let victoryConditions = (\{.*?\});/s);
                     
-                    if (match) {
+                    if (match && aliasesMatch && statsMatch && vicMatch) {
                         rooms = JSON.parse(match[1]);
-                        aliases = JSON.parse(match[2]);
-                        playerStats = JSON.parse(match[3]);
-                        victoryConditions = JSON.parse(match[4]);
+                        aliases = JSON.parse(aliasesMatch[1]);
+                        playerStats = JSON.parse(statsMatch[1]);
+                        
+                        let parsedVic = JSON.parse(vicMatch[1]);
+                        if (!Array.isArray(parsedVic)) {
+                            victoryConditions = [{ name: "Ending 1", targetRoomId: parsedVic.targetRoomId || 'none', requiredItems: parsedVic.requiredItems || [], deadNPCs: parsedVic.deadNPCs || [], victoryMessage: parsedVic.victoryMessage || "You have achieved victory!" }];
+                        } else {
+                            victoryConditions = parsedVic;
+                        }
+                        editingVicIdx = 0;
 
                         if (metaMatch) {
                             let importedMeta = JSON.parse(metaMatch[1]);
@@ -1595,26 +1525,16 @@
                         const actions = ['North', 'South', 'East', 'West', 'look', 'inv', 'take', 'drop', 'use', 'attack', 'give', 'talk'];
                         actions.forEach(act => { if (aliases[act]) document.getElementById('alias-' + act).value = aliases[act].join(', '); });
 
-                        document.getElementById('vic-msg').value = victoryConditions.victoryMessage || "You have achieved victory!";
                         updateEditorUI(); 
-                        document.getElementById('vic-room').value = victoryConditions.targetRoomId || 'none';
-                        renderVicLists();
-                        
                         drawMap();
                         logGame("<strong>Game imported successfully!</strong>", "#a6e3a1");
-                    } else {
-                        alert("Could not parse the game data. Ensure this is a valid exported HTML file.");
-                    }
-                } catch (err) {
-                    console.error(err);
-                    alert("Error reading the imported file.");
-                }
+                    } else { alert("Could not parse the game data. Ensure this is a valid exported HTML file."); }
+                } catch (err) { console.error(err); alert("Error reading the imported file."); }
                 event.target.value = ''; 
             };
             reader.readAsText(file);
         }
 
-        // Init
         renderVicLists(); updateAliases(); updatePlayerStats(); drawMap();
     </script>
 </body>
